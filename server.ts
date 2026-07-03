@@ -15,13 +15,23 @@ const MAX_LIVE_EVENTS = 200;
 
 app.use(express.json({ limit: '256kb' }));
 
+// -------------------------------------------------------------
+// MULTI-PROVIDER AI ENGINE
+// Supports NVIDIA Build, OpenRouter, and Gemini — all optional. Providers are
+// tried in order (AI_PROVIDER_ORDER env, default nvidia,openrouter,gemini)
+// with a per-request timeout; if one fails or is rate-limited the next takes
+// over, so a flaky provider never breaks the critique feature.
+// -------------------------------------------------------------
+
+const AI_REQUEST_TIMEOUT_MS = 45_000;
+
 // Initialize Gemini SDK lazily to prevent crash on startup if key is missing
 let aiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI {
   if (!aiClient) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      throw new Error('GEMINI_API_KEY environment variable is not set. Please configure it in Settings > Secrets.');
+      throw new Error('GEMINI_API_KEY environment variable is not set.');
     }
     aiClient = new GoogleGenAI({
       apiKey: apiKey,
@@ -33,6 +43,122 @@ function getGeminiClient(): GoogleGenAI {
     });
   }
   return aiClient;
+}
+
+// NVIDIA Build and OpenRouter both speak the OpenAI chat-completions dialect
+async function openAiCompatibleChat(
+  url: string,
+  apiKey: string,
+  model: string,
+  prompt: string,
+  extraHeaders: Record<string, string> = {}
+): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        ...extraHeaders
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.7,
+        max_tokens: 1000
+      }),
+      signal: controller.signal
+    });
+    if (!res.ok) {
+      const body = (await res.text()).slice(0, 300);
+      throw new Error(`HTTP ${res.status} from ${model}: ${body}`);
+    }
+    const data = await res.json() as { choices?: { message?: { content?: string } }[] };
+    const text = data.choices?.[0]?.message?.content;
+    if (!text || !text.trim()) {
+      throw new Error(`Empty completion from ${model}`);
+    }
+    return text.trim();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+interface AIProvider {
+  name: string;
+  label: string;
+  isConfigured: () => boolean;
+  generate: (prompt: string) => Promise<string>;
+}
+
+const AI_PROVIDERS: Record<string, AIProvider> = {
+  nvidia: {
+    name: 'nvidia',
+    label: 'NVIDIA Build',
+    isConfigured: () => !!process.env.NVIDIA_API_KEY,
+    generate: (prompt) => openAiCompatibleChat(
+      'https://integrate.api.nvidia.com/v1/chat/completions',
+      process.env.NVIDIA_API_KEY!,
+      process.env.NVIDIA_MODEL || 'meta/llama-3.3-70b-instruct',
+      prompt
+    )
+  },
+  openrouter: {
+    name: 'openrouter',
+    label: 'OpenRouter',
+    isConfigured: () => !!process.env.OPENROUTER_API_KEY,
+    generate: (prompt) => openAiCompatibleChat(
+      'https://openrouter.ai/api/v1/chat/completions',
+      process.env.OPENROUTER_API_KEY!,
+      process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free',
+      prompt,
+      { 'HTTP-Referer': process.env.APP_URL || 'http://localhost:3000', 'X-Title': 'CreativeFlow Hub' }
+    )
+  },
+  gemini: {
+    name: 'gemini',
+    label: 'Gemini',
+    isConfigured: () => !!process.env.GEMINI_API_KEY,
+    generate: async (prompt) => {
+      const response = await getGeminiClient().models.generateContent({
+        model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+        contents: prompt,
+        config: { temperature: 0.7, maxOutputTokens: 1000 }
+      });
+      const text = response.text;
+      if (!text || !text.trim()) throw new Error('Empty completion from Gemini');
+      return text.trim();
+    }
+  }
+};
+
+function configuredProviders(): AIProvider[] {
+  const order = (process.env.AI_PROVIDER_ORDER || 'nvidia,openrouter,gemini')
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(name => AI_PROVIDERS[name]);
+  return order.map(name => AI_PROVIDERS[name]).filter(p => p.isConfigured());
+}
+
+// Try each configured provider in order until one succeeds
+async function generateWithFallback(prompt: string): Promise<{ text: string; provider: AIProvider }> {
+  const providers = configuredProviders();
+  if (providers.length === 0) {
+    throw new Error('No AI provider configured. Set NVIDIA_API_KEY, OPENROUTER_API_KEY, or GEMINI_API_KEY in .env.local.');
+  }
+  let lastError: unknown;
+  for (const provider of providers) {
+    try {
+      const text = await provider.generate(prompt);
+      return { text, provider };
+    } catch (err) {
+      lastError = err;
+      console.warn(`AI provider '${provider.name}' failed, trying next:`, err instanceof Error ? err.message : err);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 // Seed Initial Data
@@ -398,6 +524,7 @@ app.get('/api/db', getSecurityContext, (req, res) => {
     tasks: allowedTasks,
     deliverables: allowedDeliverables,
     logs: allowedLogs,
+    aiProviders: configuredProviders().map(p => p.label),
     rlsSimulation: {
       applied: user.Role === 'Vendor',
       targetRule: user.Role === 'Vendor'
@@ -875,8 +1002,6 @@ app.post('/api/gemini/critique', getSecurityContext, async (req, res) => {
   const vendor = db.vendors.find(v => v.Vendor_ID === task.Assigned_Vendor_ID);
 
   try {
-    const ai = getGeminiClient();
-
     // Construct prompt containing task specifications, brand requirements, and submitter description
     const prompt = `You are the ultimate AI Creative Art Director overseeing vendor deliveries.
 Analyze the following creative asset delivery and provide immediate, highly professional, constructives, and strict feedback.
@@ -907,22 +1032,13 @@ FORMATTING INSTRUCTIONS:
 - Use bullet points for specific visual adjustments.
 - Do NOT output any system text or JSON wrapper. Just print the direct, beautifully formatted message.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        temperature: 0.7,
-        maxOutputTokens: 1000,
-      }
-    });
-
-    const critiqueText = response.text || "AI Art Director unable to generate constructive critique at this moment. Structure: Check dimensions, inspect typography, and confirm color balance are compliant.";
+    const { text: critiqueText, provider } = await generateWithFallback(prompt);
 
     // Append critique to Deliverable's Feedback_History
     deliverable.Feedback_History.push({
       id: newId('f-ai'),
-      reviewer: 'AI Art Director (Gemini)',
-      comment: critiqueText.trim(),
+      reviewer: `AI Art Director (${provider.label})`,
+      comment: critiqueText,
       date: new Date().toISOString(),
       source: 'AI'
     });
@@ -957,7 +1073,7 @@ FORMATTING INSTRUCTIONS:
     console.error('Error in Gemini creative feedback critique endpoint:', error);
 
     // Provide an elegant fallback critique in case of quota or api configuration issues
-    const fallbackCritique = `🤖 AI Creative Director critique failed to load (Please confirm GEMINI_API_KEY is configured in Settings > Secrets).
+    const fallbackCritique = `🤖 AI Creative Director critique is temporarily offline (configure NVIDIA_API_KEY, OPENROUTER_API_KEY, or GEMINI_API_KEY in .env.local — any one of them works).
 
     **Review Panel Checklist (Manual Review Needed):**
     - **Dimensions**: Verify asset conforms strictly to specified format: "${task.Dimensions}".
