@@ -1,15 +1,19 @@
+import 'dotenv/config';
 import express from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI, Type } from '@google/genai';
-import { ASSET_TEMPLATES, DatabaseState, Task, Deliverable, User, Vendor, NotificationLog, TaskStatus, AssetType } from './src/types';
+import crypto from 'crypto';
+import { GoogleGenAI } from '@google/genai';
+import { ASSET_TEMPLATES, DatabaseState, Task, Deliverable, User, NotificationLog, TaskStatus, AssetType } from './src/types';
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const DB_FILE = path.join(process.cwd(), 'data.json');
+const MAX_LOGS = 500;
+const MAX_LIVE_EVENTS = 200;
 
-app.use(express.json());
+app.use(express.json({ limit: '256kb' }));
 
 // Initialize Gemini SDK lazily to prevent crash on startup if key is missing
 let aiClient: GoogleGenAI | null = null;
@@ -173,64 +177,172 @@ const DEFAULT_DB: DatabaseState = {
       timestamp: '2026-06-28T08:05:00.000Z',
       type: 'system_template',
       message: 'Welcome Lightbox Pop-up task created. Pre-populated standard "Desktop Pop-up" dimensions and design templates.',
-      meta: { taskId: 't-4', assetType: 'Desktop Pop-up' }
+      meta: { taskId: 't-4', vendorId: 'v-modal', assetType: 'Desktop Pop-up' }
     },
     {
       id: 'l-2',
       timestamp: '2026-06-29T14:32:00.000Z',
       type: 'delivered',
       message: 'Deliverable welcome_modal_v1.png uploaded by ModalUX Interactive. Alerting internal PFL staff.',
-      meta: { taskId: 't-4', vendorName: 'ModalUX Interactive' }
+      meta: { taskId: 't-4', vendorId: 'v-modal', vendorName: 'ModalUX Interactive' }
     },
     {
       id: 'l-3',
       timestamp: '2026-07-01T12:05:00.000Z',
       type: 'system_template',
       message: 'LinkedIn Campaign task created. Applied automated social advertising layout blueprints.',
-      meta: { taskId: 't-1', assetType: 'LinkedIn' }
+      meta: { taskId: 't-1', vendorId: 'v-pixel', assetType: 'LinkedIn' }
     }
   ]
 };
 
-// Database Read/Write Helpers
-function loadDb(): DatabaseState {
+// -------------------------------------------------------------
+// PERSISTENCE LAYER
+// The database lives in memory as a single authoritative instance and is
+// persisted asynchronously with atomic tmp-file + rename writes. This avoids
+// re-reading/parsing the JSON file on every request and eliminates the
+// last-write-wins race between concurrent requests.
+// -------------------------------------------------------------
+
+function loadDbFromDisk(): DatabaseState {
   try {
     if (fs.existsSync(DB_FILE)) {
       const raw = fs.readFileSync(DB_FILE, 'utf-8');
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw) as DatabaseState;
+      // Guard against partially-shaped files from older versions
+      return {
+        vendors: parsed.vendors ?? [],
+        users: parsed.users ?? [],
+        tasks: parsed.tasks ?? [],
+        deliverables: parsed.deliverables ?? [],
+        logs: parsed.logs ?? []
+      };
     }
   } catch (err) {
     console.error('Error reading db file, using default state:', err);
   }
-  // Write default state to disk
-  saveDb(DEFAULT_DB);
-  return DEFAULT_DB;
+  return structuredClone(DEFAULT_DB);
 }
 
-function saveDb(data: DatabaseState) {
+const db: DatabaseState = loadDbFromDisk();
+
+let persistTimer: NodeJS.Timeout | null = null;
+let writeChain: Promise<void> = Promise.resolve();
+
+function writeDbAtomic(json: string): Promise<void> {
+  const tmpFile = DB_FILE + '.tmp';
+  return fs.promises
+    .writeFile(tmpFile, json, 'utf-8')
+    .then(() => fs.promises.rename(tmpFile, DB_FILE))
+    .catch(err => {
+      console.error('Error writing to db file:', err);
+    });
+}
+
+// Debounced, serialized persistence: coalesces bursts of mutations into a
+// single write and never lets two writes overlap.
+function persist() {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    const snapshot = JSON.stringify(db, null, 2);
+    writeChain = writeChain.then(() => writeDbAtomic(snapshot));
+  }, 100);
+}
+
+function flushSync() {
   try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
+    }
+    const tmpFile = DB_FILE + '.tmp';
+    fs.writeFileSync(tmpFile, JSON.stringify(db, null, 2), 'utf-8');
+    fs.renameSync(tmpFile, DB_FILE);
   } catch (err) {
-    console.error('Error writing to db file:', err);
+    console.error('Error flushing db on shutdown:', err);
   }
 }
 
-// Global active notifications list for simulated live WebSockets (using standard long polling updates)
-let liveEvents: any[] = [];
+process.on('SIGINT', () => { flushSync(); process.exit(0); });
+process.on('SIGTERM', () => { flushSync(); process.exit(0); });
 
-// API Middleware: Get current simulated user and enforce Row-Level Security constraints
-function getSecurityContext(req: any, res: any, next: any) {
+// Collision-safe ID generator (Date.now() alone collides within the same ms)
+function newId(prefix: string): string {
+  return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+function pushLog(log: NotificationLog) {
+  db.logs.unshift(log);
+  if (db.logs.length > MAX_LOGS) db.logs.length = MAX_LOGS;
+}
+
+// -------------------------------------------------------------
+// LIVE EVENTS (simulated WebSocket via cursor-based polling)
+// Events carry a monotonic sequence number and a vendorId scope. Clients poll
+// with their own cursor, so multiple clients each receive every event (the old
+// implementation cleared the queue on read, so only the first poller ever saw
+// an event) and vendors only receive events scoped to their own agency.
+// -------------------------------------------------------------
+
+interface LiveEvent {
+  seq: number;
+  id: string;
+  timestamp: string;
+  title: string;
+  message: string;
+  taskId: string;
+  vendorId: string;
+  vendorName: string;
+}
+
+let eventSeq = 0;
+const liveEvents: LiveEvent[] = [];
+
+function pushLiveEvent(event: Omit<LiveEvent, 'seq' | 'id' | 'timestamp'>) {
+  liveEvents.push({
+    ...event,
+    seq: ++eventSeq,
+    id: newId('alert'),
+    timestamp: new Date().toISOString()
+  });
+  if (liveEvents.length > MAX_LIVE_EVENTS) {
+    liveEvents.splice(0, liveEvents.length - MAX_LIVE_EVENTS);
+  }
+}
+
+// -------------------------------------------------------------
+// SECURITY CONTEXT
+// -------------------------------------------------------------
+
+interface AuthedRequest extends Request {
+  user: User;
+}
+
+// API Middleware: resolve the simulated user and attach it to the request.
+function getSecurityContext(req: Request, res: Response, next: NextFunction) {
   const userId = req.headers['x-simulated-user-id'] as string;
-  const db = loadDb();
-  
   const user = db.users.find(u => u.User_ID === userId);
   if (!user) {
-    return res.status(401).json({ error: 'Unauthorized. Simulated User Header is missing or invalid.' });
+    res.status(401).json({ error: 'Unauthorized. Simulated User Header is missing or invalid.' });
+    return;
   }
-
-  req.user = user;
-  req.db = db;
+  (req as AuthedRequest).user = user;
   next();
+}
+
+function vendorName(vendorId: string): string {
+  return db.vendors.find(v => v.Vendor_ID === vendorId)?.Company_Name || 'External Agency';
+}
+
+// A log entry is visible to a vendor only if it is scoped to their agency.
+function logVisibleToVendor(log: NotificationLog, vendorId: string): boolean {
+  if (log.meta.vendorId) return log.meta.vendorId === vendorId;
+  if (log.meta.taskId) {
+    const task = db.tasks.find(t => t.Task_ID === log.meta.taskId);
+    return !!task && task.Assigned_Vendor_ID === vendorId;
+  }
+  return false;
 }
 
 // -------------------------------------------------------------
@@ -238,48 +350,57 @@ function getSecurityContext(req: any, res: any, next: any) {
 // -------------------------------------------------------------
 
 // Retrieve relational state based on user isolation credentials
-app.get('/api/db', getSecurityContext, (req: any, res: any) => {
-  const user: User = req.user;
-  const db: DatabaseState = req.db;
-  
+app.get('/api/db', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+
   // Security Layer (RLS Engine Logging)
   const rlsLogs: string[] = [];
-  
-  let allowedTasks = [...db.tasks];
-  let allowedDeliverables = [...db.deliverables];
-  let allowedVendors = [...db.vendors];
-  
+
+  let allowedTasks = db.tasks;
+  let allowedDeliverables = db.deliverables;
+  let allowedVendors = db.vendors;
+  let allowedLogs = db.logs;
+  let visibleUsers = db.users;
+
   rlsLogs.push(`User Authenticated: ${user.Name} (${user.Role})`);
-  
+
   if (user.Role === 'Vendor') {
     // THE RLS RULE: Vendors can ONLY access and view rows where their User.Vendor_ID matches the Assigned_Vendor_ID
     rlsLogs.push(`RLS Query Constraint Triggered: Role == Vendor (Vendor_ID: ${user.Vendor_ID})`);
     rlsLogs.push(`Enforcing rule: Assigned_Vendor_ID == '${user.Vendor_ID}'`);
-    
-    allowedTasks = db.tasks.filter(t => t.Assigned_Vendor_ID === user.Vendor_ID);
-    allowedDeliverables = db.deliverables.filter(d => {
-      const parentTask = db.tasks.find(t => t.Task_ID === d.Task_ID);
-      return parentTask && parentTask.Assigned_Vendor_ID === user.Vendor_ID;
-    });
-    
+
+    const ownTaskIds = new Set(
+      db.tasks.filter(t => t.Assigned_Vendor_ID === user.Vendor_ID).map(t => t.Task_ID)
+    );
+    allowedTasks = db.tasks.filter(t => ownTaskIds.has(t.Task_ID));
+    allowedDeliverables = db.deliverables.filter(d => ownTaskIds.has(d.Task_ID));
+
     // Only show their own vendor registry profile
     allowedVendors = db.vendors.filter(v => v.Vendor_ID === user.Vendor_ID);
-    
-    rlsLogs.push(`RLS Result: Filtered database down to ${allowedTasks.length} Tasks, ${allowedDeliverables.length} Deliverables.`);
+
+    // Only show activity logs scoped to their own agency
+    allowedLogs = db.logs.filter(l => logVisibleToVendor(l, user.Vendor_ID!));
+
+    // Never leak other users' email addresses to external agencies
+    visibleUsers = db.users.map(u =>
+      u.User_ID === user.User_ID ? u : { ...u, Email: '' }
+    );
+
+    rlsLogs.push(`RLS Result: Filtered database down to ${allowedTasks.length} Tasks, ${allowedDeliverables.length} Deliverables, ${allowedLogs.length} Logs.`);
   } else {
     rlsLogs.push(`RLS Bypass: Internal PFL Team Member. Full administrative read query granted.`);
   }
 
   res.json({
     user,
-    users: db.users,
+    users: visibleUsers,
     vendors: allowedVendors,
     tasks: allowedTasks,
     deliverables: allowedDeliverables,
-    logs: db.logs,
+    logs: allowedLogs,
     rlsSimulation: {
       applied: user.Role === 'Vendor',
-      targetRule: user.Role === 'Vendor' 
+      targetRule: user.Role === 'Vendor'
         ? `Task.Assigned_Vendor_ID == '${user.Vendor_ID}' && Deliverable.Task.Assigned_Vendor_ID == '${user.Vendor_ID}'`
         : 'GRANT ALL (Role == Internal)',
       logs: rlsLogs,
@@ -289,18 +410,25 @@ app.get('/api/db', getSecurityContext, (req: any, res: any) => {
 });
 
 // Create Task (Auto-populates standard dimensional briefs based on Asset_Type)
-app.post('/api/tasks', getSecurityContext, (req: any, res: any) => {
-  const user: User = req.user;
-  const db: DatabaseState = req.db;
+app.post('/api/tasks', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
 
   if (user.Role !== 'Internal') {
     return res.status(403).json({ error: 'RLS Reject: Only internal PFL staff members are authorized to create or configure creative task briefs.' });
   }
 
-  const { Title, Asset_Type, Assigned_Vendor_ID, Due_Date, Custom_Dimensions, Custom_Guidelines, Custom_Requirements } = req.body;
+  const { Title, Asset_Type, Assigned_Vendor_ID, Due_Date, Custom_Dimensions, Custom_Guidelines, Custom_Requirements } = req.body ?? {};
 
-  if (!Title || !Asset_Type || !Assigned_Vendor_ID || !Due_Date) {
+  if (typeof Title !== 'string' || !Title.trim() || !Asset_Type || !Assigned_Vendor_ID || !Due_Date) {
     return res.status(400).json({ error: 'Validation Error: Title, Asset_Type, Assigned_Vendor_ID, and Due_Date are required fields.' });
+  }
+
+  if (!(Asset_Type in ASSET_TEMPLATES)) {
+    return res.status(400).json({ error: `Validation Error: Unknown Asset_Type '${Asset_Type}'.` });
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(Due_Date) || isNaN(new Date(Due_Date).getTime())) {
+    return res.status(400).json({ error: 'Validation Error: Due_Date must be a valid YYYY-MM-DD date.' });
   }
 
   // Look up vendor to confirm they exist
@@ -311,13 +439,13 @@ app.post('/api/tasks', getSecurityContext, (req: any, res: any) => {
 
   // Automation Rule 3: Automatically pre-populate default layout templates and branding specs
   const standardTemplate = ASSET_TEMPLATES[Asset_Type as AssetType];
-  const finalDimensions = Custom_Dimensions || standardTemplate?.dimensions || 'Custom specifications';
-  const finalGuidelines = Custom_Guidelines || standardTemplate?.brandGuidelines || 'Standard company guidelines';
-  const finalRequirements = Custom_Requirements || standardTemplate?.requirements || 'Standard output delivery guidelines';
+  const finalDimensions = Custom_Dimensions || standardTemplate.dimensions;
+  const finalGuidelines = Custom_Guidelines || standardTemplate.brandGuidelines;
+  const finalRequirements = Custom_Requirements || standardTemplate.requirements;
 
   const newTask: Task = {
-    Task_ID: 't-' + (db.tasks.length + 1) + '-' + Math.floor(Math.random() * 1000),
-    Title,
+    Task_ID: newId('t'),
+    Title: Title.trim(),
     Asset_Type: Asset_Type as AssetType,
     Assigned_Vendor_ID,
     Due_Date,
@@ -332,29 +460,46 @@ app.post('/api/tasks', getSecurityContext, (req: any, res: any) => {
 
   // Log automation event
   const newLog: NotificationLog = {
-    id: 'l-' + Date.now(),
+    id: newId('l'),
     timestamp: new Date().toISOString(),
     type: 'system_template',
-    message: `New creative request "${Title}" created. Automatically pre-populated specifications and guidelines for Asset Type: ${Asset_Type}.`,
+    message: `New creative request "${newTask.Title}" created. Automatically pre-populated specifications and guidelines for Asset Type: ${Asset_Type}.`,
     meta: {
       taskId: newTask.Task_ID,
       assetType: Asset_Type,
+      vendorId: vendor.Vendor_ID,
       vendorName: vendor.Company_Name
     }
   };
-  db.logs.unshift(newLog);
+  pushLog(newLog);
 
-  saveDb(db);
+  // Notify the assigned vendor's portal in real time
+  pushLiveEvent({
+    title: '📋 New Brief Assigned!',
+    message: `A new creative brief "${newTask.Title}" (${Asset_Type}) has been assigned. Due ${Due_Date}.`,
+    taskId: newTask.Task_ID,
+    vendorId: vendor.Vendor_ID,
+    vendorName: vendor.Company_Name
+  });
+
+  persist();
 
   res.status(201).json({ task: newTask, log: newLog });
 });
 
+const VALID_STATUSES: TaskStatus[] = ['Assigned', 'In Progress', 'Delivered', 'Approved', 'Needs Revision'];
+// Vendors can move their own work forward but never self-approve.
+const VENDOR_ALLOWED_STATUSES: TaskStatus[] = ['In Progress', 'Delivered'];
+
 // Update Task Status (For toggling Assigned -> In Progress or approving deliverables)
-app.post('/api/tasks/:id/status', getSecurityContext, (req: any, res: any) => {
-  const user: User = req.user;
-  const db: DatabaseState = req.db;
+app.post('/api/tasks/:id/status', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
   const taskId = req.params.id;
-  const { status } = req.body as { status: TaskStatus };
+  const { status } = (req.body ?? {}) as { status: TaskStatus };
+
+  if (!VALID_STATUSES.includes(status)) {
+    return res.status(400).json({ error: `Validation Error: '${status}' is not a valid task status.` });
+  }
 
   const task = db.tasks.find(t => t.Task_ID === taskId);
   if (!task) {
@@ -362,8 +507,13 @@ app.post('/api/tasks/:id/status', getSecurityContext, (req: any, res: any) => {
   }
 
   // RLS Security enforcement for state updating
-  if (user.Role === 'Vendor' && task.Assigned_Vendor_ID !== user.Vendor_ID) {
-    return res.status(403).json({ error: 'RLS Blocked: You are not authorized to edit tasks belonging to other external agencies.' });
+  if (user.Role === 'Vendor') {
+    if (task.Assigned_Vendor_ID !== user.Vendor_ID) {
+      return res.status(403).json({ error: 'RLS Blocked: You are not authorized to edit tasks belonging to other external agencies.' });
+    }
+    if (!VENDOR_ALLOWED_STATUSES.includes(status)) {
+      return res.status(403).json({ error: `RLS Blocked: External agencies cannot set task status to '${status}'. Approval decisions are reserved for internal PFL staff.` });
+    }
   }
 
   const oldStatus = task.Status;
@@ -371,7 +521,7 @@ app.post('/api/tasks/:id/status', getSecurityContext, (req: any, res: any) => {
 
   // Track activity
   const newLog: NotificationLog = {
-    id: 'l-' + Date.now(),
+    id: newId('l'),
     timestamp: new Date().toISOString(),
     type: 'system_template',
     message: `Task "${task.Title}" status changed from '${oldStatus}' to '${status}' by ${user.Name}.`,
@@ -381,32 +531,29 @@ app.post('/api/tasks/:id/status', getSecurityContext, (req: any, res: any) => {
       vendorId: task.Assigned_Vendor_ID
     }
   };
-  db.logs.unshift(newLog);
+  pushLog(newLog);
 
   // Automation Rule 1: WebSocket Simulation Alert for delivered assets
   if (status === 'Delivered') {
-    const liveAlert = {
-      id: 'alert-' + Date.now(),
-      timestamp: new Date().toISOString(),
+    pushLiveEvent({
       title: '📦 Asset Delivered!',
       message: `Vendor ${user.Name} has uploaded a new creative deliverable for "${task.Title}". Ready for review.`,
       taskId: task.Task_ID,
-      vendorName: db.vendors.find(v => v.Vendor_ID === task.Assigned_Vendor_ID)?.Company_Name || 'External Agency'
-    };
-    liveEvents.push(liveAlert);
+      vendorId: task.Assigned_Vendor_ID,
+      vendorName: vendorName(task.Assigned_Vendor_ID)
+    });
   }
 
-  saveDb(db);
+  persist();
   res.json({ task, log: newLog });
 });
 
 // Submit Deliverable (Upload simulating version control)
-app.post('/api/deliverables', getSecurityContext, (req: any, res: any) => {
-  const user: User = req.user;
-  const db: DatabaseState = req.db;
-  const { Task_ID, File_URL, File_Name } = req.body;
+app.post('/api/deliverables', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  const { Task_ID, File_URL, File_Name } = req.body ?? {};
 
-  if (!Task_ID || !File_URL || !File_Name) {
+  if (!Task_ID || typeof File_URL !== 'string' || !File_URL.trim() || typeof File_Name !== 'string' || !File_Name.trim()) {
     return res.status(400).json({ error: 'Validation Error: Task_ID, File_URL, and File_Name are required.' });
   }
 
@@ -420,16 +567,18 @@ app.post('/api/deliverables', getSecurityContext, (req: any, res: any) => {
     return res.status(403).json({ error: 'RLS Blocked: You can only submit deliverables for briefs explicitly assigned to your agency.' });
   }
 
-  // Count existing versions to increment version counter
-  const existingDeliverables = db.deliverables.filter(d => d.Task_ID === Task_ID);
-  const nextVersion = existingDeliverables.length + 1;
+  // Increment version relative to the highest existing version (not array
+  // length, which drifts if records are ever removed)
+  const nextVersion = db.deliverables
+    .filter(d => d.Task_ID === Task_ID)
+    .reduce((max, d) => Math.max(max, d.Version), 0) + 1;
 
   // Create new deliverable record
   const newDeliverable: Deliverable = {
-    Deliverable_ID: 'd-' + (db.deliverables.length + 1) + '-' + Math.floor(Math.random() * 1000),
+    Deliverable_ID: newId('d'),
     Task_ID,
-    File_URL,
-    File_Name,
+    File_URL: File_URL.trim(),
+    File_Name: File_Name.trim(),
     Version: nextVersion,
     Uploaded_At: new Date().toISOString(),
     Approval_Status: 'Pending',
@@ -439,48 +588,48 @@ app.post('/api/deliverables', getSecurityContext, (req: any, res: any) => {
   db.deliverables.push(newDeliverable);
 
   // Update original task state to 'Delivered'
-  const oldStatus = task.Status;
   task.Status = 'Delivered';
 
   // Log automation activity
   const newLog: NotificationLog = {
-    id: 'l-' + Date.now(),
+    id: newId('l'),
     timestamp: new Date().toISOString(),
     type: 'delivered',
-    message: `New creative file "${File_Name}" (v${nextVersion}) uploaded by agency. Project state auto-advanced to 'Delivered'.`,
+    message: `New creative file "${newDeliverable.File_Name}" (v${nextVersion}) uploaded by agency. Project state auto-advanced to 'Delivered'.`,
     meta: {
       taskId: task.Task_ID,
       taskTitle: task.Title,
       vendorId: task.Assigned_Vendor_ID,
-      vendorName: db.vendors.find(v => v.Vendor_ID === task.Assigned_Vendor_ID)?.Company_Name || 'External Agency'
+      vendorName: vendorName(task.Assigned_Vendor_ID)
     }
   };
-  db.logs.unshift(newLog);
+  pushLog(newLog);
 
   // Trigger Live Event Popup simulation
-  const liveAlert = {
-    id: 'alert-' + Date.now(),
-    timestamp: new Date().toISOString(),
+  pushLiveEvent({
     title: '📦 Asset Delivered!',
-    message: `New deliverable uploaded: "${File_Name}" (Version ${nextVersion}) for "${task.Title}".`,
+    message: `New deliverable uploaded: "${newDeliverable.File_Name}" (Version ${nextVersion}) for "${task.Title}".`,
     taskId: task.Task_ID,
-    vendorName: db.vendors.find(v => v.Vendor_ID === task.Assigned_Vendor_ID)?.Company_Name || 'External Agency'
-  };
-  liveEvents.push(liveAlert);
+    vendorId: task.Assigned_Vendor_ID,
+    vendorName: vendorName(task.Assigned_Vendor_ID)
+  });
 
-  saveDb(db);
+  persist();
   res.status(201).json({ deliverable: newDeliverable, task, log: newLog });
 });
 
 // Submit Deliverable Review (Approve or Needs Revision with feedback)
-app.post('/api/deliverables/:id/review', getSecurityContext, (req: any, res: any) => {
-  const user: User = req.user;
-  const db: DatabaseState = req.db;
+app.post('/api/deliverables/:id/review', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
   const deliverableId = req.params.id;
-  const { status, comment } = req.body as { status: 'Approved' | 'Rejected'; comment: string };
+  const { status, comment } = (req.body ?? {}) as { status: 'Approved' | 'Rejected'; comment?: string };
 
   if (user.Role !== 'Internal') {
     return res.status(403).json({ error: 'RLS Reject: Only PFL internal brand managers can review and approve agency deliverables.' });
+  }
+
+  if (status !== 'Approved' && status !== 'Rejected') {
+    return res.status(400).json({ error: "Validation Error: status must be 'Approved' or 'Rejected'." });
   }
 
   const deliverable = db.deliverables.find(d => d.Deliverable_ID === deliverableId);
@@ -496,11 +645,11 @@ app.post('/api/deliverables/:id/review', getSecurityContext, (req: any, res: any
   deliverable.Approval_Status = status;
   task.Status = status === 'Approved' ? 'Approved' : 'Needs Revision';
 
-  if (comment) {
+  if (comment && comment.trim()) {
     deliverable.Feedback_History.push({
-      id: 'f-' + Date.now(),
+      id: newId('f'),
       reviewer: user.Name,
-      comment,
+      comment: comment.trim(),
       date: new Date().toISOString(),
       source: 'Human'
     });
@@ -508,7 +657,7 @@ app.post('/api/deliverables/:id/review', getSecurityContext, (req: any, res: any
 
   // Create log entry
   const newLog: NotificationLog = {
-    id: 'l-' + Date.now(),
+    id: newId('l'),
     timestamp: new Date().toISOString(),
     type: 'system_template',
     message: `Deliverable review completed for "${deliverable.File_Name}": Set to '${status}'. Task updated to '${task.Status}'.`,
@@ -518,20 +667,28 @@ app.post('/api/deliverables/:id/review', getSecurityContext, (req: any, res: any
       vendorId: task.Assigned_Vendor_ID
     }
   };
-  db.logs.unshift(newLog);
+  pushLog(newLog);
 
-  saveDb(db);
+  // Notify the vendor portal about the review decision in real time
+  pushLiveEvent({
+    title: status === 'Approved' ? '✅ Deliverable Approved!' : '🎨 Revision Requested',
+    message: `"${deliverable.File_Name}" (v${deliverable.Version}) was ${status === 'Approved' ? 'approved' : 'sent back for revisions'} by ${user.Name}.`,
+    taskId: task.Task_ID,
+    vendorId: task.Assigned_Vendor_ID,
+    vendorName: vendorName(task.Assigned_Vendor_ID)
+  });
+
+  persist();
   res.json({ deliverable, task, log: newLog });
 });
 
 // Submit Deliverable Back-and-Forth Feedback Comment (For both Internal Brand Managers and Vendors)
-app.post('/api/deliverables/:id/feedback', getSecurityContext, (req: any, res: any) => {
-  const user: User = req.user;
-  const db: DatabaseState = req.db;
+app.post('/api/deliverables/:id/feedback', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
   const deliverableId = req.params.id;
-  const { comment } = req.body as { comment: string };
+  const { comment } = (req.body ?? {}) as { comment?: string };
 
-  if (!comment) {
+  if (typeof comment !== 'string' || !comment.trim()) {
     return res.status(400).json({ error: 'Validation Error: Comment content is required.' });
   }
 
@@ -552,16 +709,16 @@ app.post('/api/deliverables/:id/feedback', getSecurityContext, (req: any, res: a
 
   // Append comment
   deliverable.Feedback_History.push({
-    id: 'f-rep-' + Date.now(),
+    id: newId('f'),
     reviewer: user.Name,
-    comment,
+    comment: comment.trim(),
     date: new Date().toISOString(),
     source: 'Human'
   });
 
   // Create log entry
   const newLog: NotificationLog = {
-    id: 'l-' + Date.now(),
+    id: newId('l'),
     timestamp: new Date().toISOString(),
     type: 'system_template',
     message: `💬 Back-and-forth feedback comment posted on "${deliverable.File_Name}" (v${deliverable.Version}) by ${user.Name} (${user.Role}).`,
@@ -569,23 +726,22 @@ app.post('/api/deliverables/:id/feedback', getSecurityContext, (req: any, res: a
       taskId: task.Task_ID,
       taskTitle: task.Title,
       vendorId: task.Assigned_Vendor_ID,
-      vendorName: db.vendors.find(v => v.Vendor_ID === task.Assigned_Vendor_ID)?.Company_Name || 'External Agency'
+      vendorName: vendorName(task.Assigned_Vendor_ID)
     }
   };
-  db.logs.unshift(newLog);
+  pushLog(newLog);
 
   // Trigger Live Event Popup simulation
-  const liveAlert = {
-    id: 'alert-' + Date.now(),
-    timestamp: new Date().toISOString(),
+  const trimmed = comment.trim();
+  pushLiveEvent({
     title: `💬 Feedback Comment from ${user.Role === 'Internal' ? 'PFL' : 'Agency'}`,
-    message: `"${comment.length > 55 ? comment.substring(0, 55) + '...' : comment}"`,
+    message: `"${trimmed.length > 55 ? trimmed.substring(0, 55) + '...' : trimmed}"`,
     taskId: task.Task_ID,
-    vendorName: db.vendors.find(v => v.Vendor_ID === task.Assigned_Vendor_ID)?.Company_Name || 'External Agency'
-  };
-  liveEvents.push(liveAlert);
+    vendorId: task.Assigned_Vendor_ID,
+    vendorName: vendorName(task.Assigned_Vendor_ID)
+  });
 
-  saveDb(db);
+  persist();
   res.json({ deliverable, task, log: newLog });
 });
 
@@ -593,43 +749,62 @@ app.post('/api/deliverables/:id/feedback', getSecurityContext, (req: any, res: a
 // AUTOMATION CRON WORKER & ALERTS SIMULATOR
 // -------------------------------------------------------------
 
-// Polling route for receiving simulated real-time WebSocket events
-app.get('/api/live-events', (req, res) => {
-  const currentAlerts = [...liveEvents];
-  liveEvents = []; // clear queue
-  res.json({ events: currentAlerts });
+// Polling route for receiving simulated real-time WebSocket events.
+// Cursor-based: pass ?since=<seq> to receive only newer events. RLS-scoped:
+// vendors only see events for their own agency.
+app.get('/api/live-events', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  const sinceParam = req.query.since;
+
+  // Bootstrap call: hand the client the current cursor without replaying history
+  if (sinceParam === undefined) {
+    return res.json({ cursor: eventSeq, events: [] });
+  }
+
+  const since = Number(sinceParam);
+  if (!Number.isFinite(since)) {
+    return res.status(400).json({ error: "Validation Error: 'since' must be a number." });
+  }
+
+  const visible = liveEvents.filter(e =>
+    e.seq > since && (user.Role === 'Internal' || e.vendorId === user.Vendor_ID)
+  );
+
+  res.json({ cursor: eventSeq, events: visible });
 });
 
-// Trigger 48 hours overdue check (Simulates hourly Cron Job task runner)
-app.post('/api/simulate-cron', getSecurityContext, (req: any, res: any) => {
-  const db: DatabaseState = req.db;
-  const user: User = req.user;
-  
+// Overdue-window check (simulates an hourly cron job). Uses the real clock by
+// default; accepts an optional simulatedNow override for demos/testing.
+app.post('/api/simulate-cron', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+
   if (user.Role !== 'Internal') {
     return res.status(403).json({ error: 'Forbidden. Simulated Cron triggers are restricted to internal coordinators.' });
   }
 
+  const { simulatedNow } = (req.body ?? {}) as { simulatedNow?: string };
+  const now = simulatedNow ? new Date(simulatedNow) : new Date();
+  if (isNaN(now.getTime())) {
+    return res.status(400).json({ error: 'Validation Error: simulatedNow must be a valid ISO date string.' });
+  }
+
   const triggeredAlerts: NotificationLog[] = [];
-  
-  // Set simulated "current time" to compare due dates (e.g. 2026-07-02 as base)
-  const currentSimulatedTime = new Date('2026-07-02T23:42:00.000Z');
-  
+
   db.tasks.forEach(task => {
     // Check if task status is still Assigned or In Progress
     if (task.Status === 'Assigned' || task.Status === 'In Progress') {
       const dueDate = new Date(task.Due_Date + 'T23:59:59.000Z');
-      const timeDiff = dueDate.getTime() - currentSimulatedTime.getTime();
-      const hoursRemaining = timeDiff / (1000 * 60 * 60);
+      const hoursRemaining = (dueDate.getTime() - now.getTime()) / (1000 * 60 * 60);
 
-      // Trigger condition: within 48 hours of due date (hoursRemaining <= 48 && hoursRemaining > 0)
+      // Trigger condition: within 48 hours of due date
       if (hoursRemaining <= 48 && hoursRemaining >= 0) {
         // Verify if a notification log already exists for this task to prevent duplicates
         const alreadyNotified = db.logs.some(l => l.type === 'cron_reminder' && l.meta.taskId === task.Task_ID);
-        
+
         if (!alreadyNotified) {
           const vendor = db.vendors.find(v => v.Vendor_ID === task.Assigned_Vendor_ID);
           const reminderLog: NotificationLog = {
-            id: 'l-cron-' + Date.now() + '-' + task.Task_ID,
+            id: newId('l-cron'),
             timestamp: new Date().toISOString(),
             type: 'cron_reminder',
             message: `⏰ Automated 48h Escalation Reminder: Creative asset "${task.Title}" is due in ${Math.round(hoursRemaining)} hours! Automatic email dispatched to ${vendor?.Company_Name || 'assigned agency'}.`,
@@ -642,16 +817,25 @@ app.post('/api/simulate-cron', getSecurityContext, (req: any, res: any) => {
               hoursLeft: Math.round(hoursRemaining)
             }
           };
-          
+
           triggeredAlerts.push(reminderLog);
-          db.logs.unshift(reminderLog);
+          pushLog(reminderLog);
+
+          // Also surface the reminder to the assigned vendor's live feed
+          pushLiveEvent({
+            title: '⏰ Due-Date Reminder',
+            message: `"${task.Title}" is due in ${Math.round(hoursRemaining)} hours.`,
+            taskId: task.Task_ID,
+            vendorId: task.Assigned_Vendor_ID,
+            vendorName: vendor?.Company_Name || 'External Agency'
+          });
         }
       }
     }
   });
 
   if (triggeredAlerts.length > 0) {
-    saveDb(db);
+    persist();
   }
 
   res.json({
@@ -665,9 +849,9 @@ app.post('/api/simulate-cron', getSecurityContext, (req: any, res: any) => {
 // GEMINI INTELLIGENT AI ART DIRECTOR REVIEW AGENT
 // -------------------------------------------------------------
 
-app.post('/api/gemini/critique', getSecurityContext, async (req: any, res: any) => {
-  const db: DatabaseState = req.db;
-  const { deliverableId, fileSummaryText } = req.body;
+app.post('/api/gemini/critique', getSecurityContext, async (req, res) => {
+  const user = (req as AuthedRequest).user;
+  const { deliverableId, fileSummaryText } = req.body ?? {};
 
   if (!deliverableId) {
     return res.status(400).json({ error: 'Validation Error: deliverableId is required.' });
@@ -683,11 +867,16 @@ app.post('/api/gemini/critique', getSecurityContext, async (req: any, res: any) 
     return res.status(404).json({ error: 'Parent task brief not found.' });
   }
 
+  // RLS Security Check: Vendors can only request critiques on their own deliverables
+  if (user.Role === 'Vendor' && task.Assigned_Vendor_ID !== user.Vendor_ID) {
+    return res.status(403).json({ error: 'RLS Blocked: You can only request AI critiques for deliverables assigned to your agency.' });
+  }
+
   const vendor = db.vendors.find(v => v.Vendor_ID === task.Assigned_Vendor_ID);
 
   try {
     const ai = getGeminiClient();
-    
+
     // Construct prompt containing task specifications, brand requirements, and submitter description
     const prompt = `You are the ultimate AI Creative Art Director overseeing vendor deliveries.
 Analyze the following creative asset delivery and provide immediate, highly professional, constructives, and strict feedback.
@@ -731,7 +920,7 @@ FORMATTING INSTRUCTIONS:
 
     // Append critique to Deliverable's Feedback_History
     deliverable.Feedback_History.push({
-      id: 'f-ai-' + Date.now(),
+      id: newId('f-ai'),
       reviewer: 'AI Art Director (Gemini)',
       comment: critiqueText.trim(),
       date: new Date().toISOString(),
@@ -743,7 +932,7 @@ FORMATTING INSTRUCTIONS:
 
     // Log the AI critique event
     const newLog: NotificationLog = {
-      id: 'l-' + Date.now(),
+      id: newId('l'),
       timestamp: new Date().toISOString(),
       type: 'system_template',
       message: `🤖 Automated AI Creative Review dispatched for "${deliverable.File_Name}" (v${deliverable.Version}). Task status flagged as 'Needs Revision' for agency iteration.`,
@@ -753,9 +942,9 @@ FORMATTING INSTRUCTIONS:
         vendorId: task.Assigned_Vendor_ID
       }
     };
-    db.logs.unshift(newLog);
+    pushLog(newLog);
 
-    saveDb(db);
+    persist();
 
     res.json({
       critique: critiqueText,
@@ -766,26 +955,26 @@ FORMATTING INSTRUCTIONS:
 
   } catch (error) {
     console.error('Error in Gemini creative feedback critique endpoint:', error);
-    
+
     // Provide an elegant fallback critique in case of quota or api configuration issues
-    const fallbackCritique = `🤖 AI Creative Director critique failed to load (Please confirm GEMINI_API_KEY is configured in Settings > Secrets). 
-    
+    const fallbackCritique = `🤖 AI Creative Director critique failed to load (Please confirm GEMINI_API_KEY is configured in Settings > Secrets).
+
     **Review Panel Checklist (Manual Review Needed):**
     - **Dimensions**: Verify asset conforms strictly to specified format: "${task.Dimensions}".
     - **Palette**: Ensure colors align with guidelines: "${task.BrandGuidelines}".
     - **Visual Elements**: Confirm central imagery contains high-impact compositions.
     - **CTA Check**: Double check buttons are clearly visible with readable, actionable text.`;
-    
+
     deliverable.Feedback_History.push({
-      id: 'f-ai-fallback-' + Date.now(),
+      id: newId('f-ai-fallback'),
       reviewer: 'AI Director (Offline)',
       comment: fallbackCritique,
       date: new Date().toISOString(),
       source: 'AI'
     });
-    
+
     task.Status = 'Needs Revision';
-    saveDb(db);
+    persist();
 
     res.json({
       critique: fallbackCritique,
@@ -796,6 +985,22 @@ FORMATTING INSTRUCTIONS:
   }
 });
 
+// Unknown API routes should return JSON, not the SPA HTML shell
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: `Not Found: ${req.method} ${req.originalUrl}` });
+});
+
+// Centralized error handler so malformed JSON bodies and unexpected throws
+// return structured JSON instead of an HTML stack trace
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) return next(err);
+  if (err?.type === 'entity.parse.failed' || err instanceof SyntaxError) {
+    return res.status(400).json({ error: 'Validation Error: Request body is not valid JSON.' });
+  }
+  console.error('Unhandled server error:', err);
+  res.status(500).json({ error: 'Internal Server Error.' });
+});
+
 // -------------------------------------------------------------
 // VITE MIDDLEWARE & STATIC ASSET PIPELINE
 // -------------------------------------------------------------
@@ -804,7 +1009,9 @@ async function bootstrap() {
   const isProd = process.env.NODE_ENV === 'production';
 
   if (!isProd) {
-    // Mount Vite dev server middleware to handle HMR, code compiling, and SPA assets automatically
+    // Import vite dynamically so the production bundle never requires it —
+    // a static import would make `npm start` crash without devDependencies.
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -821,8 +1028,6 @@ async function bootstrap() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server successfully started on http://0.0.0.0:${PORT}`);
-    // Load database on start
-    loadDb();
   });
 }
 

@@ -127,9 +127,11 @@ export default function InternalDashboard({
     return vendors.find(v => v.Vendor_ID === vendorId)?.Company_Name || 'Unknown Vendor';
   };
 
-  // Get deliverables for a task
+  // Get deliverables for a task, oldest version first
   const getTaskDeliverables = (taskId: string) => {
-    return deliverables.filter(d => d.Task_ID === taskId);
+    return deliverables
+      .filter(d => d.Task_ID === taskId)
+      .sort((a, b) => a.Version - b.Version);
   };
 
   // Derived current reviewing deliverable to ensure fresh comments list

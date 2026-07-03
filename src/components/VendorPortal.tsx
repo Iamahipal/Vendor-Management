@@ -104,9 +104,12 @@ export default function VendorPortal({
     }
   };
 
-  // Resolve deliverables for selected task
-  const taskDeliverables = selectedTask ? deliverables.filter(d => d.Task_ID === selectedTask.Task_ID) : [];
-  const latestDeliverable = taskDeliverables[taskDeliverables.length - 1];
+  // Resolve deliverables for selected task, oldest version first
+  const taskDeliverables = selectedTask
+    ? deliverables
+        .filter(d => d.Task_ID === selectedTask.Task_ID)
+        .sort((a, b) => a.Version - b.Version)
+    : [];
 
   return (
     <div id="vendor-portal" className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
