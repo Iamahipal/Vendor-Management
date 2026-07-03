@@ -1,7 +1,7 @@
 import { useState, FormEvent } from 'react';
-import { DatabaseState, Task, Deliverable, Vendor, AssetType, TaskStatus, ASSET_TEMPLATES } from '../types';
+import { DatabaseState, Task, Deliverable, Vendor, AssetType, TaskStatus, ASSET_TEMPLATES, getDueUrgency } from '../types';
 import GlassTile from './GlassTile';
-import { Plus, Filter, Clock, CheckCircle, AlertTriangle, User, Layers, ArrowRight, ExternalLink, FileCode, Check, X } from 'lucide-react';
+import { Plus, Filter, Clock, CheckCircle, AlertTriangle, User, Layers, ArrowRight, ExternalLink, FileCode, Check, X, Search } from 'lucide-react';
 
 interface InternalDashboardProps {
   dbState: DatabaseState;
@@ -31,6 +31,7 @@ export default function InternalDashboard({
   // UI state filters
   const [filterAssetType, setFilterAssetType] = useState<string>('ALL');
   const [filterVendor, setFilterVendor] = useState<string>('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
   
   // Create Task Form State
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -106,12 +107,20 @@ export default function InternalDashboard({
     }
   };
 
-  // Filter tasks
+  // Filter tasks (asset type, vendor, and free-text search across title/id/vendor)
+  const query = searchQuery.trim().toLowerCase();
   const filteredTasks = tasks.filter(task => {
     const matchAsset = filterAssetType === 'ALL' || task.Asset_Type === filterAssetType;
     const matchVendor = filterVendor === 'ALL' || task.Assigned_Vendor_ID === filterVendor;
-    return matchAsset && matchVendor;
+    const matchSearch = !query
+      || task.Title.toLowerCase().includes(query)
+      || task.Task_ID.toLowerCase().includes(query)
+      || (vendors.find(v => v.Vendor_ID === task.Assigned_Vendor_ID)?.Company_Name.toLowerCase().includes(query) ?? false);
+    return matchAsset && matchVendor && matchSearch;
   });
+
+  // Overdue awareness for the toolbar
+  const overdueCount = tasks.filter(t => getDueUrgency(t)?.tone === 'overdue').length;
 
   // Kanban Column aggregation
   const columns: { label: string; status: TaskStatus; bg: string; border: string; text: string }[] = [
@@ -186,6 +195,26 @@ export default function InternalDashboard({
       {/* Main Control Center: Filter Toolbar */}
       <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xs">
         <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+          {/* Search box */}
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg">
+            <Search className="h-3.5 w-3.5 text-slate-500" />
+            <input
+              type="text"
+              placeholder="Search briefs, vendors, IDs..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="bg-transparent text-xs font-sans font-semibold text-slate-700 outline-none w-44 placeholder:font-normal placeholder:text-slate-400"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+
           {/* Asset Type Filter */}
           <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg">
             <Filter className="h-3.5 w-3.5 text-slate-500" />
@@ -218,6 +247,14 @@ export default function InternalDashboard({
             </select>
           </div>
         </div>
+
+        {/* Overdue awareness chip */}
+        {overdueCount > 0 && (
+          <span className="flex items-center gap-1.5 text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-lg font-mono shrink-0">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {overdueCount} OVERDUE
+          </span>
+        )}
 
         {/* Create Brief Button */}
         <button
@@ -259,13 +296,19 @@ export default function InternalDashboard({
                     colTasks.map(task => {
                       const taskDels = getTaskDeliverables(task.Task_ID);
                       const latestDel = taskDels[taskDels.length - 1];
+                      const urgency = getDueUrgency(task);
 
                       return (
                         <div
                           key={task.Task_ID}
-                          className="group bg-white border border-slate-200 hover:border-slate-300 p-4 rounded-xl shadow-xs transition-all duration-150 relative cursor-pointer"
+                          className={`group bg-white border p-4 rounded-xl shadow-xs transition-all duration-150 relative cursor-pointer ${
+                            urgency?.tone === 'overdue'
+                              ? 'border-rose-300 hover:border-rose-400'
+                              : 'border-slate-200 hover:border-slate-300'
+                          }`}
                           onClick={() => {
-                            if (task.Status === 'Delivered' && latestDel) {
+                            // Any task with a submitted file can be inspected/reviewed
+                            if (latestDel) {
                               setReviewingDeliverable(latestDel);
                             }
                           }}
@@ -287,16 +330,27 @@ export default function InternalDashboard({
 
                           {/* Vendor assignee */}
                           <div className="mt-3 flex items-center justify-between">
-                            <div className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                            <div className="flex items-center gap-1.5 text-[11px] text-slate-600 min-w-0">
                               <User className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                              <span className="truncate max-w-[120px] font-medium">{getVendorName(task.Assigned_Vendor_ID)}</span>
+                              <span className="truncate font-medium">{getVendorName(task.Assigned_Vendor_ID)}</span>
                             </div>
 
                             {/* Date warning status */}
-                            <div className="flex items-center gap-1 text-[11px] text-slate-500 font-mono">
-                              <Clock className="h-3 w-3 shrink-0 text-slate-400" />
-                              <span>{task.Due_Date.substring(5)}</span>
-                            </div>
+                            {urgency ? (
+                              <span className={`flex items-center gap-1 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border whitespace-nowrap shrink-0 ${
+                                urgency.tone === 'overdue'
+                                  ? 'bg-rose-50 border-rose-200 text-rose-700'
+                                  : 'bg-amber-50 border-amber-200 text-amber-700'
+                              }`}>
+                                <Clock className="h-3 w-3 shrink-0" />
+                                {urgency.label}
+                              </span>
+                            ) : (
+                              <div className="flex items-center gap-1 text-[11px] text-slate-500 font-mono">
+                                <Clock className="h-3 w-3 shrink-0 text-slate-400" />
+                                <span>{task.Due_Date.substring(5)}</span>
+                              </div>
+                            )}
                           </div>
 
                           {/* Latest Deliverable Version badge */}

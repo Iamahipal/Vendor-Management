@@ -55,7 +55,7 @@ export interface Deliverable {
 export interface NotificationLog {
   id: string;
   timestamp: string;
-  type: 'delivered' | 'cron_reminder' | 'system_template';
+  type: 'delivered' | 'cron_reminder' | 'cron_overdue' | 'system_template';
   message: string;
   meta: {
     taskId?: string;
@@ -75,6 +75,24 @@ export interface DatabaseState {
   deliverables: Deliverable[];
   logs: NotificationLog[];
   user?: User;
+}
+
+// Deadline urgency for a task, shown as badges in both dashboards.
+// Returns null when the task is done or the deadline is comfortably far out.
+export function getDueUrgency(task: Pick<Task, 'Due_Date' | 'Status'>): { label: string; tone: 'overdue' | 'soon' } | null {
+  if (task.Status === 'Approved' || task.Status === 'Delivered') return null;
+  const end = new Date(task.Due_Date + 'T23:59:59.000Z').getTime();
+  const diffMs = end - Date.now();
+  const day = 24 * 60 * 60 * 1000;
+  if (diffMs < 0) {
+    const daysOver = Math.max(1, Math.ceil(-diffMs / day));
+    return { label: `Overdue ${daysOver}d`, tone: 'overdue' };
+  }
+  const daysLeft = Math.ceil(diffMs / day);
+  if (daysLeft <= 2) {
+    return { label: daysLeft <= 1 ? 'Due today' : `Due in ${daysLeft}d`, tone: 'soon' };
+  }
+  return null;
 }
 
 export interface AssetTemplate {

@@ -1,7 +1,7 @@
 import { useState, FormEvent } from 'react';
-import { DatabaseState, Task, Deliverable, TaskStatus, FeedbackItem, ASSET_TEMPLATES } from '../types';
+import { DatabaseState, Task, Deliverable, TaskStatus, FeedbackItem, ASSET_TEMPLATES, getDueUrgency } from '../types';
 import GlassTile from './GlassTile';
-import { Inbox, Briefcase, RefreshCw, UploadCloud, Sparkles, History, CheckCircle, ArrowRight, X } from 'lucide-react';
+import { Inbox, Briefcase, RefreshCw, UploadCloud, Sparkles, History, CheckCircle, ArrowRight, X, Clock } from 'lucide-react';
 
 interface VendorPortalProps {
   dbState: DatabaseState;
@@ -52,8 +52,10 @@ export default function VendorPortal({
     setSubmittedFileUrl(asset.url);
   };
 
-  // Filter tasks belonging exclusively to current vendor based on RLS isolation logic
-  const vendorTasks = tasks.filter(t => t.Assigned_Vendor_ID === user?.Vendor_ID);
+  // Filter tasks belonging exclusively to current vendor based on RLS isolation logic,
+  // sorted by deadline so the most urgent work is always at the top
+  const byDueDate = (a: Task, b: Task) => a.Due_Date.localeCompare(b.Due_Date);
+  const vendorTasks = tasks.filter(t => t.Assigned_Vendor_ID === user?.Vendor_ID).sort(byDueDate);
   const selectedTask = selectedTaskId ? vendorTasks.find(t => t.Task_ID === selectedTaskId) || null : null;
 
   // 1. "New Briefs" -> Tasks in status 'Assigned'
@@ -94,9 +96,10 @@ export default function VendorPortal({
   const handleRequestAIArtDirectorReview = async (deliverableId: string) => {
     setIsAiLoading(true);
     try {
+      // Advisory pre-check: the critique lands in this deliverable's feedback
+      // thread right here — no tab switch, no task status change.
       await onRequestAICritique(deliverableId, aiSummaryInput || 'Requesting design layout and guidelines review.');
       setAiSummaryInput('');
-      setActiveTab('feedback_revisions');
     } catch (err) {
       console.error(err);
     } finally {
@@ -231,8 +234,21 @@ export default function VendorPortal({
                       <span className="text-[10px] font-mono text-slate-400">ID: {task.Task_ID}</span>
                     </div>
                     <h4 className="font-sans font-bold text-sm text-slate-800">{task.Title}</h4>
-                    <p className="text-[11px] text-slate-500 font-mono">
+                    <p className="text-[11px] text-slate-500 font-mono flex items-center gap-2">
                       Milestone Target: <span className="text-slate-700 font-bold">{task.Due_Date}</span>
+                      {(() => {
+                        const urgency = getDueUrgency(task);
+                        return urgency ? (
+                          <span className={`flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                            urgency.tone === 'overdue'
+                              ? 'bg-rose-50 border-rose-200 text-rose-700'
+                              : 'bg-amber-50 border-amber-200 text-amber-700'
+                          }`}>
+                            <Clock className="h-3 w-3 shrink-0" />
+                            {urgency.label}
+                          </span>
+                        ) : null;
+                      })()}
                     </p>
                   </div>
 

@@ -558,6 +558,11 @@ app.post('/api/tasks', getSecurityContext, (req, res) => {
     return res.status(400).json({ error: 'Validation Error: Due_Date must be a valid YYYY-MM-DD date.' });
   }
 
+  // A brief that is already overdue at creation time is a data-entry mistake
+  if (new Date(Due_Date + 'T23:59:59.000Z').getTime() < Date.now()) {
+    return res.status(400).json({ error: 'Validation Error: Due_Date is in the past. Please pick a future milestone date.' });
+  }
+
   // Look up vendor to confirm they exist
   const vendor = db.vendors.find(v => v.Vendor_ID === Assigned_Vendor_ID);
   if (!vendor) {
@@ -900,8 +905,94 @@ app.get('/api/live-events', getSecurityContext, (req, res) => {
   res.json({ cursor: eventSeq, events: visible });
 });
 
-// Overdue-window check (simulates an hourly cron job). Uses the real clock by
-// default; accepts an optional simulatedNow override for demos/testing.
+// Scans all active tasks and dispatches two kinds of alerts:
+//  - cron_reminder: task due within 48 hours (once per task)
+//  - cron_overdue:  task past its due date (escalated at most once per 24h)
+// Runs automatically every hour (see bootstrap) and on demand via the API.
+const OVERDUE_REESCALATE_MS = 24 * 60 * 60 * 1000;
+
+function runReminderScan(now: Date): NotificationLog[] {
+  const triggeredAlerts: NotificationLog[] = [];
+
+  db.tasks.forEach(task => {
+    // Only tasks still awaiting vendor work are actionable
+    if (task.Status !== 'Assigned' && task.Status !== 'In Progress') return;
+
+    const dueDate = new Date(task.Due_Date + 'T23:59:59.000Z');
+    const hoursRemaining = (dueDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+    const vendor = db.vendors.find(v => v.Vendor_ID === task.Assigned_Vendor_ID);
+
+    if (hoursRemaining < 0) {
+      // OVERDUE: escalate, but at most once per 24 hours per task
+      const lastEscalation = db.logs.find(l => l.type === 'cron_overdue' && l.meta.taskId === task.Task_ID);
+      if (lastEscalation && now.getTime() - new Date(lastEscalation.timestamp).getTime() < OVERDUE_REESCALATE_MS) {
+        return;
+      }
+      const hoursOverdue = Math.round(-hoursRemaining);
+      // Stamp with scan time so the 24h dedup stays consistent when the scan
+      // runs with a simulatedNow override
+      const overdueLog: NotificationLog = {
+        id: newId('l-cron'),
+        timestamp: now.toISOString(),
+        type: 'cron_overdue',
+        message: `🚨 OVERDUE Escalation: Creative asset "${task.Title}" is ${hoursOverdue}h past its due date (${task.Due_Date}) and still '${task.Status}'. Escalation email dispatched to ${vendor?.Company_Name || 'assigned agency'} and internal coordinators.`,
+        meta: {
+          taskId: task.Task_ID,
+          taskTitle: task.Title,
+          vendorId: task.Assigned_Vendor_ID,
+          vendorName: vendor?.Company_Name,
+          dueDate: task.Due_Date,
+          hoursLeft: -hoursOverdue
+        }
+      };
+      triggeredAlerts.push(overdueLog);
+      pushLog(overdueLog);
+      pushLiveEvent({
+        title: '🚨 Task Overdue!',
+        message: `"${task.Title}" is ${hoursOverdue}h past due and still '${task.Status}'.`,
+        taskId: task.Task_ID,
+        vendorId: task.Assigned_Vendor_ID,
+        vendorName: vendor?.Company_Name || 'External Agency'
+      });
+    } else if (hoursRemaining <= 48) {
+      // DUE SOON: remind once per task
+      const alreadyNotified = db.logs.some(l => l.type === 'cron_reminder' && l.meta.taskId === task.Task_ID);
+      if (alreadyNotified) return;
+
+      const reminderLog: NotificationLog = {
+        id: newId('l-cron'),
+        timestamp: now.toISOString(),
+        type: 'cron_reminder',
+        message: `⏰ Automated 48h Escalation Reminder: Creative asset "${task.Title}" is due in ${Math.round(hoursRemaining)} hours! Automatic email dispatched to ${vendor?.Company_Name || 'assigned agency'}.`,
+        meta: {
+          taskId: task.Task_ID,
+          taskTitle: task.Title,
+          vendorId: task.Assigned_Vendor_ID,
+          vendorName: vendor?.Company_Name,
+          dueDate: task.Due_Date,
+          hoursLeft: Math.round(hoursRemaining)
+        }
+      };
+      triggeredAlerts.push(reminderLog);
+      pushLog(reminderLog);
+      pushLiveEvent({
+        title: '⏰ Due-Date Reminder',
+        message: `"${task.Title}" is due in ${Math.round(hoursRemaining)} hours.`,
+        taskId: task.Task_ID,
+        vendorId: task.Assigned_Vendor_ID,
+        vendorName: vendor?.Company_Name || 'External Agency'
+      });
+    }
+  });
+
+  if (triggeredAlerts.length > 0) {
+    persist();
+  }
+  return triggeredAlerts;
+}
+
+// Manual trigger for the reminder scan. Uses the real clock by default;
+// accepts an optional simulatedNow override for demos/testing.
 app.post('/api/simulate-cron', getSecurityContext, (req, res) => {
   const user = (req as AuthedRequest).user;
 
@@ -915,55 +1006,7 @@ app.post('/api/simulate-cron', getSecurityContext, (req, res) => {
     return res.status(400).json({ error: 'Validation Error: simulatedNow must be a valid ISO date string.' });
   }
 
-  const triggeredAlerts: NotificationLog[] = [];
-
-  db.tasks.forEach(task => {
-    // Check if task status is still Assigned or In Progress
-    if (task.Status === 'Assigned' || task.Status === 'In Progress') {
-      const dueDate = new Date(task.Due_Date + 'T23:59:59.000Z');
-      const hoursRemaining = (dueDate.getTime() - now.getTime()) / (1000 * 60 * 60);
-
-      // Trigger condition: within 48 hours of due date
-      if (hoursRemaining <= 48 && hoursRemaining >= 0) {
-        // Verify if a notification log already exists for this task to prevent duplicates
-        const alreadyNotified = db.logs.some(l => l.type === 'cron_reminder' && l.meta.taskId === task.Task_ID);
-
-        if (!alreadyNotified) {
-          const vendor = db.vendors.find(v => v.Vendor_ID === task.Assigned_Vendor_ID);
-          const reminderLog: NotificationLog = {
-            id: newId('l-cron'),
-            timestamp: new Date().toISOString(),
-            type: 'cron_reminder',
-            message: `⏰ Automated 48h Escalation Reminder: Creative asset "${task.Title}" is due in ${Math.round(hoursRemaining)} hours! Automatic email dispatched to ${vendor?.Company_Name || 'assigned agency'}.`,
-            meta: {
-              taskId: task.Task_ID,
-              taskTitle: task.Title,
-              vendorId: task.Assigned_Vendor_ID,
-              vendorName: vendor?.Company_Name,
-              dueDate: task.Due_Date,
-              hoursLeft: Math.round(hoursRemaining)
-            }
-          };
-
-          triggeredAlerts.push(reminderLog);
-          pushLog(reminderLog);
-
-          // Also surface the reminder to the assigned vendor's live feed
-          pushLiveEvent({
-            title: '⏰ Due-Date Reminder',
-            message: `"${task.Title}" is due in ${Math.round(hoursRemaining)} hours.`,
-            taskId: task.Task_ID,
-            vendorId: task.Assigned_Vendor_ID,
-            vendorName: vendor?.Company_Name || 'External Agency'
-          });
-        }
-      }
-    }
-  });
-
-  if (triggeredAlerts.length > 0) {
-    persist();
-  }
+  const triggeredAlerts = runReminderScan(now);
 
   res.json({
     triggered: triggeredAlerts.length,
@@ -1043,15 +1086,16 @@ FORMATTING INSTRUCTIONS:
       source: 'AI'
     });
 
-    // Auto update task status if AI found feedback so the vendor can iterate
-    task.Status = 'Needs Revision';
+    // Note: the AI critique is advisory only — it must never change the task
+    // status. A vendor pre-checking their own draft shouldn't derail the
+    // client's pending review.
 
     // Log the AI critique event
     const newLog: NotificationLog = {
       id: newId('l'),
       timestamp: new Date().toISOString(),
       type: 'system_template',
-      message: `🤖 Automated AI Creative Review dispatched for "${deliverable.File_Name}" (v${deliverable.Version}). Task status flagged as 'Needs Revision' for agency iteration.`,
+      message: `🤖 Advisory AI Creative Review added to "${deliverable.File_Name}" (v${deliverable.Version}). Task status unchanged — awaiting human review decision.`,
       meta: {
         taskId: task.Task_ID,
         taskTitle: task.Title,
@@ -1089,7 +1133,6 @@ FORMATTING INSTRUCTIONS:
       source: 'AI'
     });
 
-    task.Status = 'Needs Revision';
     persist();
 
     res.json({
@@ -1145,6 +1188,11 @@ async function bootstrap() {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server successfully started on http://0.0.0.0:${PORT}`);
   });
+
+  // Real automation: run the reminder/overdue scan shortly after startup and
+  // then every hour — no manual button press required.
+  setTimeout(() => runReminderScan(new Date()), 10_000);
+  setInterval(() => runReminderScan(new Date()), 60 * 60 * 1000);
 }
 
 bootstrap();
