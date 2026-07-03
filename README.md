@@ -9,7 +9,7 @@ A collaborative creative-asset pipeline for managing external vendor agencies: i
 - **Row-level security simulation** — the server filters tasks, deliverables, vendors, logs, and live events per role. Vendors can never read (or act on) another agency's data; approval decisions are reserved for internal staff.
 - **Live events** — cursor-based polling stream (simulated WebSockets). Every open client receives every event scoped to its role.
 - **Automation** — a simulated cron worker that scans for briefs due within 48 hours and dispatches reminder notifications.
-- **AI Art Director** — Gemini reviews a deliverable against the brief's dimensions, brand guidelines, and requirements (falls back to a manual checklist when no API key is configured).
+- **AI Art Director** — reviews a deliverable against the brief's dimensions, brand guidelines, and requirements. Works with **NVIDIA Build, OpenRouter, or Gemini** (any one key is enough) and automatically fails over between configured providers; falls back to a manual checklist when none are configured or all are down.
 
 ## Architecture
 
@@ -18,7 +18,7 @@ A collaborative creative-asset pipeline for managing external vendor agencies: i
 | Frontend | React 19 + Vite 6 + Tailwind CSS 4, `lucide-react` icons, `motion` animations |
 | Backend | Express (TypeScript, run with `tsx` in dev, bundled with esbuild for prod) |
 | Storage | JSON file (`data.json`) held in memory and persisted with debounced atomic writes |
-| AI | `@google/genai` (Gemini 2.5 Flash), lazily initialized |
+| AI | Multi-provider with auto-failover: NVIDIA Build / OpenRouter (OpenAI-compatible, via fetch) and Gemini (`@google/genai`) |
 
 The Express server owns both the API (`/api/*`) and the frontend: in development it mounts Vite middleware (HMR included); in production it serves the built `dist/` folder.
 
@@ -31,13 +31,19 @@ npm install
 npm run dev          # http://localhost:3000
 ```
 
-Optional — enable the AI Art Director by putting your Gemini API key in `.env.local` (or `.env`):
+## AI Art Director setup (free)
+
+The AI critique feature works with **any one** of three providers — configure whichever you have in `.env.local` (copy `.env.example` to get started):
 
 ```
-GEMINI_API_KEY=your-key-here
+NVIDIA_API_KEY=nvapi-...        # free credits at https://build.nvidia.com
+OPENROUTER_API_KEY=sk-or-...    # free-tier models at https://openrouter.ai/keys
+GEMINI_API_KEY=...              # free tier at https://aistudio.google.com/apikey
 ```
 
-Without a key the app still works; AI critiques return a manual review checklist instead.
+**Reliability:** if you configure more than one key, the server tries them in order (`AI_PROVIDER_ORDER`, default `nvidia,openrouter,gemini`) with a 45-second timeout each — when one provider errors out or hits a rate limit, the next takes over automatically. If every provider fails, vendors get a manual review checklist instead of an error, so the app never breaks.
+
+The System Control Panel (Automation Work tab) shows which providers are detected. Without any key the app still fully works; only AI critiques are replaced by the checklist.
 
 ## Production build
 

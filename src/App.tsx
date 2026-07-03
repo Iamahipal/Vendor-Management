@@ -30,7 +30,7 @@ interface AlertNotification {
 }
 
 export default function App() {
-  const [dbState, setDbState] = useState<DatabaseState & { rlsSimulation?: any }>({
+  const [dbState, setDbState] = useState<DatabaseState & { rlsSimulation?: any; aiProviders?: string[] }>({
     users: [],
     vendors: [],
     tasks: [],

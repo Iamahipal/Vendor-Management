@@ -3,7 +3,7 @@ import { DatabaseState, NotificationLog, Task, Deliverable, Vendor, User } from 
 import { ShieldAlert, ShieldCheck, Terminal, Database, Mail, RefreshCw, Layers, Lock } from 'lucide-react';
 
 interface SystemControlPanelProps {
-  dbState: DatabaseState & { rlsSimulation?: any };
+  dbState: DatabaseState & { rlsSimulation?: any; aiProviders?: string[] };
   onSimulateCron: () => Promise<void>;
   isCronSimulating: boolean;
   selectedUserId: string;
@@ -18,7 +18,7 @@ export default function SystemControlPanel({
   const [activeTab, setActiveTab] = useState<'rls' | 'tables' | 'cron' | 'alerts'>('rls');
   const [selectedTableName, setSelectedTableName] = useState<'users' | 'vendors' | 'tasks' | 'deliverables'>('tasks');
 
-  const { rlsSimulation, users = [], vendors = [], tasks = [], deliverables = [], logs = [] } = dbState;
+  const { rlsSimulation, users = [], vendors = [], tasks = [], deliverables = [], logs = [], aiProviders = [] } = dbState;
 
   const activeUser = users.find(u => u.User_ID === selectedUserId);
 
@@ -326,6 +326,20 @@ export default function SystemControlPanel({
       {/* Tab Content 3: Automated Cron Simulation */}
       {activeTab === 'cron' && (
         <div className="space-y-4">
+          {/* AI Provider status */}
+          <div className={`p-3 rounded-xl border flex items-center gap-2 text-xs ${
+            aiProviders.length > 0
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              : 'bg-amber-50 border-amber-200 text-amber-900'
+          }`}>
+            <span className="font-bold font-mono text-[10px] uppercase shrink-0">🤖 AI Art Director:</span>
+            <span className="font-sans">
+              {aiProviders.length > 0
+                ? `Online — provider chain: ${aiProviders.join(' → ')} (auto-failover)`
+                : 'Offline — set NVIDIA_API_KEY, OPENROUTER_API_KEY, or GEMINI_API_KEY in .env.local to enable AI critiques.'}
+            </span>
+          </div>
+
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="space-y-1">
               <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5 font-sans">
