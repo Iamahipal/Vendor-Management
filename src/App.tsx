@@ -46,7 +46,7 @@ export default function App() {
 
   // Live Toast notifications queue
   const [alerts, setAlerts] = useState<AlertNotification[]>([]);
-  
+
   // Ref to track latest user ID in closures
   const selectedUserRef = useRef(selectedUserId);
 
@@ -54,8 +54,32 @@ export default function App() {
     selectedUserRef.current = selectedUserId;
   }, [selectedUserId]);
 
+  // Monotonic counter so a slow response for a previous user can never
+  // overwrite the state of the currently selected user
+  const fetchSeqRef = useRef(0);
+
+  // Cursor into the server-side live event stream (null until bootstrapped)
+  const eventCursorRef = useRef<number | null>(null);
+
+  // Surface an error as a toast notification (auto-dismissed)
+  const pushErrorAlert = (message: string) => {
+    const alert: AlertNotification = {
+      id: 'err-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+      timestamp: new Date().toISOString(),
+      title: '⚠️ Action Failed',
+      message,
+      taskId: '—',
+      vendorName: 'System'
+    };
+    setAlerts(prev => [...prev, alert]);
+    setTimeout(() => {
+      setAlerts(prev => prev.filter(a => a.id !== alert.id));
+    }, 6000);
+  };
+
   // Fetch complete dataset with security context
   const fetchDb = async () => {
+    const seq = ++fetchSeqRef.current;
     try {
       const res = await fetch('/api/db', {
         headers: {
@@ -64,12 +88,17 @@ export default function App() {
       });
       if (res.ok) {
         const data = await res.json();
-        setDbState(data);
+        // Discard stale responses that finished after a newer request started
+        if (seq === fetchSeqRef.current) {
+          setDbState(data);
+        }
       }
     } catch (e) {
       console.error('Error fetching relational database:', e);
     } finally {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -79,26 +108,35 @@ export default function App() {
     fetchDb();
   }, [selectedUserId]);
 
-  // Short polling loop for simulated WebSocket events
+  // Short polling loop for simulated WebSocket events (cursor-based, so
+  // multiple open clients each receive every event exactly once)
   useEffect(() => {
-    const checkLiveEvents = async () => {
-      try {
-        const res = await fetch('/api/live-events');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.events && data.events.length > 0) {
-            // Add new events to active alerts toast queue
-            setAlerts(prev => [...prev, ...data.events]);
-            // Refresh database to show new uploads instantly
-            fetchDb();
+    let cancelled = false;
 
-            // Auto-dismiss toasts after 5 seconds
-            data.events.forEach((event: AlertNotification) => {
-              setTimeout(() => {
-                setAlerts(prev => prev.filter(a => a.id !== event.id));
-              }, 5000);
-            });
-          }
+    const checkLiveEvents = async () => {
+      // Skip polling while the tab is hidden to save cycles
+      if (document.hidden) return;
+      try {
+        const cursor = eventCursorRef.current;
+        const url = cursor === null ? '/api/live-events' : `/api/live-events?since=${cursor}`;
+        const res = await fetch(url, {
+          headers: { 'x-simulated-user-id': selectedUserRef.current }
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        eventCursorRef.current = data.cursor ?? eventCursorRef.current;
+        if (data.events && data.events.length > 0) {
+          // Add new events to active alerts toast queue
+          setAlerts(prev => [...prev, ...data.events]);
+          // Refresh database to show new uploads instantly
+          fetchDb();
+
+          // Auto-dismiss toasts after 5 seconds
+          data.events.forEach((event: AlertNotification) => {
+            setTimeout(() => {
+              setAlerts(prev => prev.filter(a => a.id !== event.id));
+            }, 5000);
+          });
         }
       } catch (err) {
         console.error('Error checking live events:', err);
@@ -106,7 +144,10 @@ export default function App() {
     };
 
     const interval = setInterval(checkLiveEvents, 2500);
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   // API Call: Add new creative brief
@@ -132,10 +173,11 @@ export default function App() {
         await fetchDb();
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to create task brief.');
+        pushErrorAlert(err.error || 'Failed to create task brief.');
       }
     } catch (e) {
       console.error(e);
+      pushErrorAlert('Network error: failed to create task brief.');
     }
   };
 
@@ -152,9 +194,13 @@ export default function App() {
       });
       if (res.ok) {
         await fetchDb();
+      } else {
+        const err = await res.json();
+        pushErrorAlert(err.error || 'Failed to update task status.');
       }
     } catch (e) {
       console.error(e);
+      pushErrorAlert('Network error: failed to update task status.');
     }
   };
 
@@ -173,10 +219,11 @@ export default function App() {
         await fetchDb();
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to submit deliverable.');
+        pushErrorAlert(err.error || 'Failed to submit deliverable.');
       }
     } catch (e) {
       console.error(e);
+      pushErrorAlert('Network error: failed to submit deliverable.');
     }
   };
 
@@ -195,10 +242,11 @@ export default function App() {
         await fetchDb();
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to review deliverable.');
+        pushErrorAlert(err.error || 'Failed to review deliverable.');
       }
     } catch (e) {
       console.error(e);
+      pushErrorAlert('Network error: failed to review deliverable.');
     }
   };
 
@@ -214,9 +262,13 @@ export default function App() {
       });
       if (res.ok) {
         await fetchDb();
+      } else {
+        const err = await res.json();
+        pushErrorAlert(err.error || 'Failed to run automation scan.');
       }
     } catch (e) {
       console.error(e);
+      pushErrorAlert('Network error: failed to run automation scan.');
     } finally {
       setIsCronRunning(false);
     }
@@ -237,10 +289,11 @@ export default function App() {
         await fetchDb();
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to post feedback comment.');
+        pushErrorAlert(err.error || 'Failed to post feedback comment.');
       }
     } catch (e) {
       console.error(e);
+      pushErrorAlert('Network error: failed to post feedback comment.');
     }
   };
 
