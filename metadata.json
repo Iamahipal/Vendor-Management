@@ -1,0 +1,6 @@
+{
+  "name": "Vendor Management Dashboard",
+  "description": "A high-fidelity creative asset vendor management dashboard with isolated vendor portals, internal Kanban board, and automated notification triggers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
