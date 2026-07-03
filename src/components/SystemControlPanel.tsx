@@ -22,8 +22,8 @@ export default function SystemControlPanel({
 
   const activeUser = users.find(u => u.User_ID === selectedUserId);
 
-  // Simulated email alerts triggered by cron
-  const emailAlerts = logs.filter(l => l.type === 'cron_reminder');
+  // Simulated email alerts triggered by cron (due-soon reminders + overdue escalations)
+  const emailAlerts = logs.filter(l => l.type === 'cron_reminder' || l.type === 'cron_overdue');
 
   return (
     <div id="system-control-panel" className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs relative overflow-hidden animate-fade-in">
@@ -347,7 +347,7 @@ export default function SystemControlPanel({
                 Target Trigger: Delivery Due Reminders
               </h3>
               <p className="text-[11px] text-slate-500 max-w-lg leading-normal">
-                Crawls database to locate pending assignments expiring inside 48 hours relative to pipeline timestamps, sending automated visual mock notifications to relevant creative partners.
+                Runs automatically every hour: reminds vendors of assignments due within 48 hours and escalates overdue tasks (re-escalated daily until resolved). The button below triggers an immediate scan.
               </p>
             </div>
 
@@ -406,11 +406,13 @@ export default function SystemControlPanel({
                     ? 'bg-blue-50/50 border-blue-200 text-blue-900'
                     : log.type === 'cron_reminder'
                     ? 'bg-amber-50/50 border-amber-200 text-amber-900'
+                    : log.type === 'cron_overdue'
+                    ? 'bg-rose-50/50 border-rose-200 text-rose-900'
                     : 'bg-white border-slate-200 text-slate-700'
                 }`}
               >
                 <div className="shrink-0 mt-0.5 font-bold select-none text-xs">
-                  {log.type === 'delivered' ? '📦' : log.type === 'cron_reminder' ? '⏰' : '⚙️'}
+                  {log.type === 'delivered' ? '📦' : log.type === 'cron_reminder' ? '⏰' : log.type === 'cron_overdue' ? '🚨' : '⚙️'}
                 </div>
                 <div className="flex-1 space-y-0.5">
                   <div className="leading-relaxed font-sans">{log.message}</div>
