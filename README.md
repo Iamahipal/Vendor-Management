@@ -1,6 +1,8 @@
 # CreativeFlow Hub — Vendor Management Dashboard
 
-A collaborative creative-asset pipeline for managing external vendor agencies: internal staff create creative briefs, vendors submit deliverables, and both sides iterate through review/feedback cycles — with simulated row-level security (RLS), live event notifications, automated due-date reminders, and an optional Gemini-powered AI art director.
+A collaborative creative-asset pipeline for managing external vendor agencies: internal staff create creative briefs, vendors submit deliverables, and both sides iterate through review/feedback cycles — with simulated row-level security (RLS), live event notifications, automated due-date reminders, and an optional AI art director.
+
+**▶ Live demo:** https://iamahipal.github.io/Vendor-Management/ — an interactive static build deployed automatically to GitHub Pages on every push to `main`. The entire API runs in your browser (data persists in localStorage; use "Reset Demo Data" to start over). AI critiques are offline in the demo since a public page cannot hold API keys — run locally to enable them.
 
 ## Features
 

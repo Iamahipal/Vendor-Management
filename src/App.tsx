@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { DatabaseState, User, TaskStatus, AssetType } from './types';
+import { DEMO_MODE, demoFetch, resetDemoDb } from './demoApi';
 import GlassTile from './components/GlassTile';
 import InternalDashboard from './components/InternalDashboard';
 import VendorPortal from './components/VendorPortal';
@@ -28,6 +29,10 @@ interface AlertNotification {
   taskId: string;
   vendorName: string;
 }
+
+// In static demo mode (GitHub Pages) the whole API runs in the browser;
+// otherwise talk to the Express server as usual.
+const apiFetch: typeof fetch = DEMO_MODE ? (demoFetch as typeof fetch) : (...args) => fetch(...args);
 
 export default function App() {
   const [dbState, setDbState] = useState<DatabaseState & { rlsSimulation?: any; aiProviders?: string[] }>({
@@ -81,7 +86,7 @@ export default function App() {
   const fetchDb = async () => {
     const seq = ++fetchSeqRef.current;
     try {
-      const res = await fetch('/api/db', {
+      const res = await apiFetch('/api/db', {
         headers: {
           'x-simulated-user-id': selectedUserRef.current
         }
@@ -119,7 +124,7 @@ export default function App() {
       try {
         const cursor = eventCursorRef.current;
         const url = cursor === null ? '/api/live-events' : `/api/live-events?since=${cursor}`;
-        const res = await fetch(url, {
+        const res = await apiFetch(url, {
           headers: { 'x-simulated-user-id': selectedUserRef.current }
         });
         if (!res.ok || cancelled) return;
@@ -161,7 +166,7 @@ export default function App() {
     Custom_Requirements: string;
   }) => {
     try {
-      const res = await fetch('/api/tasks', {
+      const res = await apiFetch('/api/tasks', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -184,7 +189,7 @@ export default function App() {
   // API Call: Change Task Status
   const handleUpdateTaskStatus = async (taskId: string, status: TaskStatus) => {
     try {
-      const res = await fetch(`/api/tasks/${taskId}/status`, {
+      const res = await apiFetch(`/api/tasks/${taskId}/status`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -207,7 +212,7 @@ export default function App() {
   // API Call: Submit mockup file
   const handleSubmitDeliverable = async (Task_ID: string, File_URL: string, File_Name: string) => {
     try {
-      const res = await fetch('/api/deliverables', {
+      const res = await apiFetch('/api/deliverables', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -230,7 +235,7 @@ export default function App() {
   // API Call: Approve or Reject draft with comment
   const handleReviewDeliverable = async (deliverableId: string, status: 'Approved' | 'Rejected', comment: string) => {
     try {
-      const res = await fetch(`/api/deliverables/${deliverableId}/review`, {
+      const res = await apiFetch(`/api/deliverables/${deliverableId}/review`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -254,7 +259,7 @@ export default function App() {
   const handleSimulateCron = async () => {
     setIsCronRunning(true);
     try {
-      const res = await fetch('/api/simulate-cron', {
+      const res = await apiFetch('/api/simulate-cron', {
         method: 'POST',
         headers: {
           'x-simulated-user-id': selectedUserId
@@ -277,7 +282,7 @@ export default function App() {
   // API Call: Post back-and-forth feedback comment on a deliverable
   const handlePostFeedback = async (deliverableId: string, comment: string) => {
     try {
-      const res = await fetch(`/api/deliverables/${deliverableId}/feedback`, {
+      const res = await apiFetch(`/api/deliverables/${deliverableId}/feedback`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -300,7 +305,7 @@ export default function App() {
   // API Call: Request Gemini creative feedback and critique
   const handleRequestAICritique = async (deliverableId: string, summary: string): Promise<string> => {
     try {
-      const res = await fetch('/api/gemini/critique', {
+      const res = await apiFetch('/api/gemini/critique', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -416,7 +421,25 @@ export default function App() {
 
       {/* Main Container Wrapper */}
       <main className="flex-1 p-6 max-w-7xl mx-auto w-full space-y-6 pb-24">
-        
+
+        {/* Static demo notice (GitHub Pages build) */}
+        {DEMO_MODE && (
+          <div className="p-3 rounded-xl border border-violet-200 bg-violet-50 text-violet-900 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs shadow-xs">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-violet-600 shrink-0" />
+              <span>
+                <span className="font-bold">Interactive demo</span> — everything runs in your browser and is saved locally. Try switching personas, creating briefs, and submitting files. AI critiques are offline here (they need private API keys).
+              </span>
+            </div>
+            <button
+              onClick={() => { resetDemoDb(); window.location.reload(); }}
+              className="self-start sm:self-auto shrink-0 px-3 py-1.5 bg-white border border-violet-300 hover:bg-violet-100 text-violet-800 font-bold rounded-lg text-[11px] transition-all cursor-pointer"
+            >
+              Reset Demo Data
+            </button>
+          </div>
+        )}
+
         {/* Isolated Vault Guard Notification */}
         {currentUser && (
           <div className={`p-4 rounded-xl border flex items-start sm:items-center justify-between gap-4 shadow-xs ${
