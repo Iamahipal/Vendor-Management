@@ -58,7 +58,7 @@ export default function VendorPortal({
   const vendorTasks = tasks.filter(t => t.Assigned_Vendor_ID === user?.Vendor_ID).sort(byDueDate);
   const selectedTask = selectedTaskId ? vendorTasks.find(t => t.Task_ID === selectedTaskId) || null : null;
 
-  // 1. "New Briefs" -> Tasks in status 'Assigned'
+  // 1. "New Requests" -> Tasks in status 'Assigned'
   const newBriefs = vendorTasks.filter(t => t.Status === 'Assigned');
 
   // 2. "Tasks in Progress" -> Tasks in status 'In Progress' or 'Delivered' (awaiting review)
@@ -135,11 +135,11 @@ export default function VendorPortal({
           >
             <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide">
               <Inbox className="h-4 w-4" />
-              New Briefs
+              New Requests
             </div>
             <div className="flex items-end justify-between w-full mt-3">
               <span className="text-3xl font-extrabold font-sans leading-none">{newBriefs.length}</span>
-              <span className="text-[10px] font-mono opacity-80">Pending</span>
+              <span className="text-[10px] font-mono opacity-80">waiting for you</span>
             </div>
           </button>
 
@@ -156,11 +156,11 @@ export default function VendorPortal({
           >
             <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide">
               <Briefcase className="h-4 w-4" />
-              In Production
+              In Progress
             </div>
             <div className="flex items-end justify-between w-full mt-3">
               <span className="text-3xl font-extrabold font-sans leading-none">{tasksInProgress.length}</span>
-              <span className="text-[10px] font-mono opacity-80">Active</span>
+              <span className="text-[10px] font-mono opacity-80">underway</span>
             </div>
           </button>
 
@@ -177,11 +177,11 @@ export default function VendorPortal({
           >
             <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide">
               <RefreshCw className="h-4 w-4" />
-              Revisions
+              Changes
             </div>
             <div className="flex items-end justify-between w-full mt-3">
               <span className="text-3xl font-extrabold font-sans leading-none">{feedbackRevisions.length}</span>
-              <span className="text-[10px] font-mono opacity-80">Iterative</span>
+              <span className="text-[10px] font-mono opacity-80">to fix</span>
             </div>
           </button>
         </div>
@@ -189,25 +189,25 @@ export default function VendorPortal({
         {/* Task List Container */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs min-h-[380px]">
           <h3 className="font-sans font-bold text-xs text-slate-800 mb-4 uppercase tracking-wider flex items-center gap-2">
-            {activeTab === 'new_briefs' && '📥 Assigned Briefings Awaiting Work'}
-            {activeTab === 'in_progress' && '⚡ Production Pipeline'}
-            {activeTab === 'feedback_revisions' && '🎨 Feedback & Iteration List'}
+            {activeTab === 'new_briefs' && '📥 New requests waiting for you'}
+            {activeTab === 'in_progress' && '⚡ Work in progress'}
+            {activeTab === 'feedback_revisions' && '🎨 Changes requested'}
           </h3>
 
           <div className="space-y-3">
             {activeTab === 'new_briefs' && newBriefs.length === 0 && (
               <div className="py-20 text-center text-slate-400 text-xs font-sans">
-                No unstarted briefs assigned. All tasks are currently underway!
+                Nothing new right now — you're all caught up!
               </div>
             )}
             {activeTab === 'in_progress' && tasksInProgress.length === 0 && (
               <div className="py-20 text-center text-slate-400 text-xs font-sans">
-                No active production tasks. Go to "New Briefs" to begin.
+                No active production tasks. Go to "New Requests" to begin.
               </div>
             )}
             {activeTab === 'feedback_revisions' && feedbackRevisions.length === 0 && (
               <div className="py-20 text-center text-slate-400 text-xs font-sans">
-                Excellent! No pending revisions requested.
+                Great — no changes requested!
               </div>
             )}
 
@@ -235,7 +235,7 @@ export default function VendorPortal({
                     </div>
                     <h4 className="font-sans font-bold text-sm text-slate-800">{task.Title}</h4>
                     <p className="text-[11px] text-slate-500 font-mono flex items-center gap-2">
-                      Milestone Target: <span className="text-slate-700 font-bold">{task.Due_Date}</span>
+                      Due: <span className="text-slate-700 font-bold">{task.Due_Date}</span>
                       {(() => {
                         const urgency = getDueUrgency(task);
                         return urgency ? (
@@ -261,20 +261,20 @@ export default function VendorPortal({
                         }}
                         className="py-1.5 px-3 bg-slate-900 hover:bg-slate-800 text-white font-semibold font-sans text-xs rounded-lg flex items-center gap-1 transition-all cursor-pointer"
                       >
-                        Accept & Start
+                        Accept & start
                         <ArrowRight className="h-3.5 w-3.5" />
                       </button>
                     )}
 
                     {task.Status === 'In Progress' && (
                       <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 px-2 py-1 rounded font-mono font-bold uppercase">
-                        In Production
+                        In Progress
                       </span>
                     )}
 
                     {task.Status === 'Delivered' && (
                       <span className="text-[10px] bg-blue-50 text-blue-800 border border-blue-200 px-2 py-1 rounded font-mono font-bold uppercase">
-                        Awaiting PFL Approval (v{dels.length})
+                        Waiting for review (v{dels.length})
                       </span>
                     )}
 
@@ -287,7 +287,7 @@ export default function VendorPortal({
 
                     {task.Status === 'Needs Revision' && (
                       <span className="text-[10px] bg-rose-50 text-rose-800 border border-rose-200 px-2 py-1 rounded font-mono font-bold uppercase">
-                        Revision Requested
+                        Changes requested
                       </span>
                     )}
                   </div>
@@ -308,7 +308,7 @@ export default function VendorPortal({
               <div className="space-y-4">
                 <div className="flex justify-between items-start">
                   <div>
-                    <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">ACTIVE BRIEFING</span>
+                    <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">REQUEST DETAILS</span>
                     <h3 className="font-sans font-bold text-sm text-slate-800 mt-1 leading-snug">{selectedTask.Title}</h3>
                   </div>
                   <span className="text-[10px] font-mono text-slate-400 shrink-0 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
@@ -319,15 +319,15 @@ export default function VendorPortal({
                 {/* Specs Box */}
                 <div className="space-y-2.5 bg-slate-50 border border-slate-200 p-4 rounded-lg text-xs font-sans text-slate-600">
                   <div>
-                    <span className="text-[10px] font-mono text-slate-400 uppercase block font-bold">Required Dimensions:</span>
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block font-bold">Size:</span>
                     <span className="font-mono text-slate-800">{selectedTask.Dimensions}</span>
                   </div>
                   <div>
-                    <span className="text-[10px] font-mono text-slate-400 uppercase block font-bold mt-1.5">Guidelines & Assets:</span>
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block font-bold mt-1.5">Brand guidelines:</span>
                     <span className="text-slate-800">{selectedTask.BrandGuidelines}</span>
                   </div>
                   <div>
-                    <span className="text-[10px] font-mono text-slate-400 uppercase block font-bold mt-1.5">Deliverable Rules:</span>
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block font-bold mt-1.5">What it must include:</span>
                     <span className="text-slate-800">{selectedTask.Requirements}</span>
                   </div>
                 </div>
@@ -335,7 +335,7 @@ export default function VendorPortal({
                 {/* Submission Block */}
                 {selectedTask.Status === 'In Progress' || selectedTask.Status === 'Needs Revision' ? (
                   <div className="space-y-3">
-                    <h4 className="text-[10px] font-mono text-slate-500 uppercase tracking-wider font-bold">SUBMIT COLLABORATIVE DRAFT</h4>
+                    <h4 className="text-[10px] font-mono text-slate-500 uppercase tracking-wider font-bold">SEND YOUR DESIGN</h4>
                     
                     {!isSubmittingFile ? (
                       <button
@@ -343,12 +343,12 @@ export default function VendorPortal({
                         className="w-full py-2.5 border border-dashed border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-sans font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer"
                       >
                         <UploadCloud className="h-4.5 w-4.5 text-slate-500" />
-                        Upload Mockup Creative File
+                        Send a design link
                       </button>
                     ) : (
                       <form onSubmit={handleSubmitFile} className="space-y-3 border border-slate-200 bg-slate-50 p-4 rounded-xl text-xs">
                         <div className="flex justify-between items-center mb-1">
-                          <span className="font-mono text-[9px] font-bold text-slate-500">SIMULATED UPLOADER</span>
+                          <span className="font-mono text-[9px] font-bold text-slate-500">SEND A DESIGN</span>
                           <button
                             type="button"
                             onClick={() => setIsSubmittingFile(false)}
@@ -360,7 +360,7 @@ export default function VendorPortal({
 
                         {/* Autofill selectors */}
                         <div className="space-y-1">
-                          <span className="text-[9px] text-slate-400 font-mono block">SELECT A DEMO CREATIVE FILE:</span>
+                          <span className="text-[9px] text-slate-400 font-mono block">OR PICK A DEMO IMAGE:</span>
                           <div className="grid grid-cols-2 gap-1.5">
                             {UNSPASH_MOCK_ASSETS.map((asset, idx) => (
                               <button
@@ -389,7 +389,7 @@ export default function VendorPortal({
                         </div>
 
                         <div className="space-y-1">
-                          <span className="text-slate-500 text-[10px] font-mono">FILE PUBLIC URL</span>
+                          <span className="text-slate-500 text-[10px] font-mono">LINK TO YOUR FILE (OneDrive / Drive / Dropbox)</span>
                           <input
                             type="text"
                             required
@@ -405,7 +405,7 @@ export default function VendorPortal({
                           disabled={isSubmitPending}
                           className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs cursor-pointer"
                         >
-                          {isSubmitPending ? 'Submitting File...' : 'Dispatch Deliverable'}
+                          {isSubmitPending ? 'Sending...' : 'Send design'}
                         </button>
                       </form>
                     )}
@@ -417,7 +417,7 @@ export default function VendorPortal({
                   <div className="space-y-3 pt-2">
                     <h4 className="text-[10px] font-mono text-slate-500 uppercase tracking-wider font-bold flex items-center gap-1">
                       <History className="h-3.5 w-3.5" />
-                      Feedback History & Drafts
+                      Your designs & feedback
                     </h4>
 
                     <div className="space-y-2 max-h-[170px] overflow-y-auto pr-1">
@@ -438,12 +438,12 @@ export default function VendorPortal({
                           {del.Approval_Status === 'Pending' && (
                             <div className="space-y-2 pt-1">
                               <div className="text-[10px] text-slate-600 leading-relaxed bg-white border border-slate-200 p-2.5 rounded">
-                                💡 Client review is pending. Trigger the AI Art Director to audit your compliance beforehand!
+                                💡 Waiting for the client to review. Want a quick AI check first?
                               </div>
                               <div className="space-y-1 bg-white p-2.5 rounded-lg border border-slate-200">
                                 <input
                                   type="text"
-                                  placeholder="Brief focus area (optional)..."
+                                  placeholder="Anything specific to check? (optional)"
                                   value={aiSummaryInput}
                                   onChange={(e) => setAiSummaryInput(e.target.value)}
                                   className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[11px] text-slate-800 focus:outline-none"
@@ -455,7 +455,7 @@ export default function VendorPortal({
                                   className="w-full py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] rounded flex items-center justify-center gap-1 transition-all cursor-pointer"
                                 >
                                   <Sparkles className="h-3 w-3 text-amber-400" />
-                                  {isAiLoading ? 'AI Reviewing...' : 'Review Draft with AI Director'}
+                                  {isAiLoading ? 'AI is checking...' : 'Check my design with AI'}
                                 </button>
                               </div>
                             </div>
@@ -463,7 +463,7 @@ export default function VendorPortal({
 
                           {/* Comments list */}
                           {del.Feedback_History.length === 0 ? (
-                            <div className="text-[10px] text-slate-400 font-mono text-center py-2">No feedback on this version.</div>
+                            <div className="text-[10px] text-slate-400 font-mono text-center py-2">No comments yet.</div>
                           ) : (
                             <div className="space-y-2 divide-y divide-slate-100 pt-1">
                               {del.Feedback_History.map((fb: FeedbackItem) => (
@@ -499,7 +499,7 @@ export default function VendorPortal({
                             >
                               <input
                                 type="text"
-                                placeholder="Post revision note or response..."
+                                placeholder="Write a reply..."
                                 value={replyInputs[del.Deliverable_ID] || ''}
                                 onChange={(e) => setReplyInputs(prev => ({ ...prev, [del.Deliverable_ID]: e.target.value }))}
                                 disabled={isReplySubmitting[del.Deliverable_ID]}
@@ -527,7 +527,7 @@ export default function VendorPortal({
                   onClick={() => handleStartTask(selectedTask.Task_ID)}
                   className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-lg"
                 >
-                  Accept & Start Production
+                  Accept & start
                 </button>
               )}
             </div>
@@ -536,9 +536,9 @@ export default function VendorPortal({
               <div className="p-3 bg-slate-100 rounded-xl border border-slate-200 mb-3 text-slate-400">
                 <Inbox className="h-6 w-6 text-slate-400" />
               </div>
-              <h4 className="font-sans font-bold text-xs text-slate-700">No Brief Selected</h4>
+              <h4 className="font-sans font-bold text-xs text-slate-700">Nothing selected</h4>
               <p className="text-[11px] text-slate-400 max-w-xs mt-1 leading-normal">
-                Select a client request on the left to read guidelines, check specs, download assets, and dispatch file uploads.
+                Click a request on the left to see its details and send your design.
               </p>
             </div>
           )}

@@ -124,11 +124,11 @@ export default function InternalDashboard({
 
   // Kanban Column aggregation
   const columns: { label: string; status: TaskStatus; bg: string; border: string; text: string }[] = [
-    { label: 'Brief Assigned', status: 'Assigned', bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-700' },
-    { label: 'In Production', status: 'In Progress', bg: 'bg-amber-50/50', border: 'border-amber-200', text: 'text-amber-800' },
-    { label: 'Delivered (Needs Review)', status: 'Delivered', bg: 'bg-blue-50/50', border: 'border-blue-200', text: 'text-blue-800' },
-    { label: 'Needs Revisions', status: 'Needs Revision', bg: 'bg-rose-50/50', border: 'border-rose-200', text: 'text-rose-800' },
-    { label: 'Approved & Signed', status: 'Approved', bg: 'bg-emerald-50/50', border: 'border-emerald-200', text: 'text-emerald-800' },
+    { label: 'New', status: 'Assigned', bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-700' },
+    { label: 'Being Made', status: 'In Progress', bg: 'bg-amber-50/50', border: 'border-amber-200', text: 'text-amber-800' },
+    { label: 'Ready for Review', status: 'Delivered', bg: 'bg-blue-50/50', border: 'border-blue-200', text: 'text-blue-800' },
+    { label: 'Changes Needed', status: 'Needs Revision', bg: 'bg-rose-50/50', border: 'border-rose-200', text: 'text-rose-800' },
+    { label: 'Approved', status: 'Approved', bg: 'bg-emerald-50/50', border: 'border-emerald-200', text: 'text-emerald-800' },
   ];
 
   // Helper to resolve vendor name
@@ -154,33 +154,33 @@ export default function InternalDashboard({
       {/* Portfolio Quick Stats (Sleek High Contrast Cards) */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <GlassTile className="border-slate-200 bg-white hover:bg-slate-50 transition-all shadow-xs">
-          <span className="text-slate-500 text-[10px] font-mono uppercase tracking-wider block">TOTAL REQUESTS</span>
+          <span className="text-slate-500 text-[10px] font-mono uppercase tracking-wider block">ALL REQUESTS</span>
           <span className="text-3xl font-extrabold font-sans mt-2 text-slate-900">{tasks.length}</span>
-          <span className="text-[10px] text-slate-400 mt-1 font-mono">Active briefs</span>
+          <span className="text-[10px] text-slate-400 mt-1 font-mono">everything in flight</span>
         </GlassTile>
 
         <GlassTile className="border-amber-200 bg-amber-50/30">
-          <span className="text-amber-700 text-[10px] font-mono uppercase tracking-wider block">IN PROGRESS</span>
+          <span className="text-amber-700 text-[10px] font-mono uppercase tracking-wider block">BEING MADE</span>
           <span className="text-3xl font-extrabold font-sans mt-2 text-amber-900">
             {tasks.filter(t => t.Status === 'In Progress').length}
           </span>
-          <span className="text-[10px] text-amber-600 mt-1 font-mono">Agencies editing</span>
+          <span className="text-[10px] text-amber-600 mt-1 font-mono">vendors working on these</span>
         </GlassTile>
 
         <GlassTile className="border-blue-200 bg-blue-50/30">
-          <span className="text-blue-700 text-[10px] font-mono uppercase tracking-wider block">NEEDS REVIEW</span>
+          <span className="text-blue-700 text-[10px] font-mono uppercase tracking-wider block">READY FOR REVIEW</span>
           <span className="text-3xl font-extrabold font-sans mt-2 text-blue-900">
             {tasks.filter(t => t.Status === 'Delivered').length}
           </span>
-          <span className="text-[10px] text-blue-600 mt-1 font-mono">Files submitted</span>
+          <span className="text-[10px] text-blue-600 mt-1 font-mono">waiting on you</span>
         </GlassTile>
 
         <GlassTile className="border-rose-200 bg-rose-50/30">
-          <span className="text-rose-700 text-[10px] font-mono uppercase tracking-wider block">REVISIONS</span>
+          <span className="text-rose-700 text-[10px] font-mono uppercase tracking-wider block">CHANGES NEEDED</span>
           <span className="text-3xl font-extrabold font-sans mt-2 text-rose-900">
             {tasks.filter(t => t.Status === 'Needs Revision').length}
           </span>
-          <span className="text-[10px] text-rose-600 mt-1 font-mono">Iterating drafts</span>
+          <span className="text-[10px] text-rose-600 mt-1 font-mono">back with the vendor</span>
         </GlassTile>
 
         <GlassTile className="border-emerald-200 bg-emerald-50/30 col-span-2 md:col-span-1">
@@ -188,7 +188,7 @@ export default function InternalDashboard({
           <span className="text-3xl font-extrabold font-sans mt-2 text-emerald-900">
             {tasks.filter(t => t.Status === 'Approved').length}
           </span>
-          <span className="text-[10px] text-emerald-600 mt-1 font-mono">Campaigns complete</span>
+          <span className="text-[10px] text-emerald-600 mt-1 font-mono">all done</span>
         </GlassTile>
       </div>
 
@@ -262,7 +262,7 @@ export default function InternalDashboard({
           className="w-full md:w-auto py-2 px-4 bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-bold font-sans text-xs rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer shrink-0"
         >
           <Plus className="h-4 w-4" />
-          Create Creative Request
+          New Request
         </button>
       </div>
 
@@ -290,7 +290,7 @@ export default function InternalDashboard({
                 <div className="flex-1 overflow-y-auto space-y-3 pr-1 pb-4">
                   {colTasks.length === 0 ? (
                     <div className="h-28 rounded-xl border border-dashed border-slate-200 bg-white/50 flex items-center justify-center p-4 text-center">
-                      <span className="text-slate-400 font-sans text-xxs">No requests.</span>
+                      <span className="text-slate-400 font-sans text-xxs">Nothing here.</span>
                     </div>
                   ) : (
                     colTasks.map(task => {
@@ -363,7 +363,7 @@ export default function InternalDashboard({
 
                               {task.Status === 'Delivered' ? (
                                 <span className="text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded text-[9px] uppercase font-bold tracking-wide animate-pulse">
-                                  Review Draft
+                                  Review now
                                 </span>
                               ) : (
                                 <span className="text-slate-500">
@@ -383,7 +383,7 @@ export default function InternalDashboard({
                                 }}
                                 className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-[10px] rounded text-slate-700 transition-colors font-medium cursor-pointer"
                               >
-                                Start Production →
+                                Mark as started →
                               </button>
                             )}
                           </div>
@@ -404,7 +404,7 @@ export default function InternalDashboard({
           <div className="bg-white border border-slate-200 rounded-xl w-full max-w-xl shadow-2xl overflow-hidden animate-slide-in">
             {/* Header */}
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50">
-              <h3 className="font-sans font-bold text-slate-900 text-sm">New Creative Campaign Brief</h3>
+              <h3 className="font-sans font-bold text-slate-900 text-sm">New design request</h3>
               <button
                 onClick={() => setShowCreateModal(false)}
                 className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-slate-600 transition-all cursor-pointer"
@@ -418,7 +418,7 @@ export default function InternalDashboard({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Title */}
                 <div className="space-y-1.5 md:col-span-2">
-                  <label className="text-slate-600 font-sans text-xs font-semibold">Campaign Title / Asset Concept Name</label>
+                  <label className="text-slate-600 font-sans text-xs font-semibold">What do you need?</label>
                   <input
                     type="text"
                     required
@@ -431,7 +431,7 @@ export default function InternalDashboard({
 
                 {/* Asset Type */}
                 <div className="space-y-1.5">
-                  <label className="text-slate-600 font-sans text-xs font-semibold">Asset Format Target</label>
+                  <label className="text-slate-600 font-sans text-xs font-semibold">Type of design</label>
                   <select
                     value={newAssetType}
                     onChange={(e) => handleAssetTypeChange(e.target.value as AssetType)}
@@ -447,7 +447,7 @@ export default function InternalDashboard({
 
                 {/* Assigned Vendor */}
                 <div className="space-y-1.5">
-                  <label className="text-slate-600 font-sans text-xs font-semibold">Assigned External Agency</label>
+                  <label className="text-slate-600 font-sans text-xs font-semibold">Which vendor?</label>
                   <select
                     value={newVendorId || (vendors.length > 0 ? vendors[0].Vendor_ID : '')}
                     onChange={(e) => setNewVendorId(e.target.value)}
@@ -463,7 +463,7 @@ export default function InternalDashboard({
 
                 {/* Due Date */}
                 <div className="space-y-1.5">
-                  <label className="text-slate-600 font-sans text-xs font-semibold">Milestone Due Date</label>
+                  <label className="text-slate-600 font-sans text-xs font-semibold">Due date</label>
                   <input
                     type="date"
                     required
@@ -483,7 +483,7 @@ export default function InternalDashboard({
 
                 {/* Editable specifications populated by default templates */}
                 <div className="space-y-1.5 md:col-span-2">
-                  <label className="text-slate-600 font-sans text-xs font-semibold">Standard Output Dimensions</label>
+                  <label className="text-slate-600 font-sans text-xs font-semibold">Size</label>
                   <input
                     type="text"
                     value={customDimensions}
@@ -493,7 +493,7 @@ export default function InternalDashboard({
                 </div>
 
                 <div className="space-y-1.5 md:col-span-2">
-                  <label className="text-slate-600 font-sans text-xs font-semibold">Target Brand Guidelines</label>
+                  <label className="text-slate-600 font-sans text-xs font-semibold">Brand guidelines</label>
                   <textarea
                     rows={2}
                     value={customGuidelines}
@@ -503,7 +503,7 @@ export default function InternalDashboard({
                 </div>
 
                 <div className="space-y-1.5 md:col-span-2">
-                  <label className="text-slate-600 font-sans text-xs font-semibold">Detailed Creative Requirements</label>
+                  <label className="text-slate-600 font-sans text-xs font-semibold">What it must include</label>
                   <textarea
                     rows={2}
                     value={customRequirements}
@@ -528,7 +528,7 @@ export default function InternalDashboard({
                   disabled={isSubmittingTask}
                   className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
                 >
-                  {isSubmittingTask ? 'Creating...' : 'Confirm & Dispatch Brief'}
+                  {isSubmittingTask ? 'Creating...' : 'Create request'}
                 </button>
               </div>
             </form>
@@ -543,7 +543,7 @@ export default function InternalDashboard({
             {/* Visual Mockup File Preview */}
             <div className="flex-1 bg-slate-50 relative overflow-hidden flex flex-col justify-between p-4 border-r border-slate-200">
               <span className="absolute top-4 left-4 text-[10px] font-mono bg-white px-2 py-1 rounded border border-slate-200 text-slate-500 uppercase tracking-wider z-10 shadow-3xs">
-                Asset Attachment
+                Design
               </span>
 
               {/* Image rendering */}
@@ -566,7 +566,7 @@ export default function InternalDashboard({
               <div className="space-y-4 overflow-y-auto max-h-[440px] pr-1">
                 <div className="flex justify-between items-start">
                   <div>
-                    <h3 className="font-sans font-bold text-sm text-slate-900">Review Draft</h3>
+                    <h3 className="font-sans font-bold text-sm text-slate-900">Review design</h3>
                     <p className="text-[10px] text-slate-400 font-mono mt-0.5">ID: {currentReviewingDeliverable.Deliverable_ID}</p>
                   </div>
                   <button
@@ -579,17 +579,17 @@ export default function InternalDashboard({
 
                 {/* Requirements check list */}
                 <div className="space-y-1.5 bg-slate-50 p-3 rounded-lg border border-slate-150 text-[11px]">
-                  <div className="text-slate-500 font-bold uppercase text-[9px]">Brief Specifications:</div>
+                  <div className="text-slate-500 font-bold uppercase text-[9px]">What was asked for:</div>
                   <div className="text-slate-700">Size: <span className="font-mono text-slate-900 text-[10px] block">{tasks.find(t => t.Task_ID === currentReviewingDeliverable.Task_ID)?.Dimensions}</span></div>
                   <div className="text-slate-700 mt-1.5">Guidelines: <span className="text-slate-900 block mt-0.5 font-sans leading-tight">{tasks.find(t => t.Task_ID === currentReviewingDeliverable.Task_ID)?.BrandGuidelines}</span></div>
                 </div>
 
                 {/* Feedback Thread list */}
                 <div className="space-y-2">
-                  <div className="text-slate-500 font-bold uppercase text-[9px]">Feedback Thread ({currentReviewingDeliverable.Feedback_History.length}):</div>
+                  <div className="text-slate-500 font-bold uppercase text-[9px]">Conversation ({currentReviewingDeliverable.Feedback_History.length}):</div>
                   <div className="space-y-2 max-h-[130px] overflow-y-auto pr-1 bg-slate-50 p-2.5 rounded-lg border border-slate-150">
                     {currentReviewingDeliverable.Feedback_History.length === 0 ? (
-                      <div className="text-[10px] text-slate-400 font-mono text-center py-2">No past comments.</div>
+                      <div className="text-[10px] text-slate-400 font-mono text-center py-2">No comments yet.</div>
                     ) : (
                       currentReviewingDeliverable.Feedback_History.map(fb => (
                         <div key={fb.id} className="text-[11px] leading-snug border-b border-slate-100 pb-1.5 last:border-0 last:pb-0">
@@ -606,12 +606,12 @@ export default function InternalDashboard({
 
                 {/* Write comment */}
                 <div className="space-y-1">
-                  <label className="text-slate-600 font-sans text-xs font-semibold">Critique & Feedback</label>
+                  <label className="text-slate-600 font-sans text-xs font-semibold">Your feedback</label>
                   <textarea
                     rows={2}
                     value={reviewComment}
                     onChange={(e) => setReviewComment(e.target.value)}
-                    placeholder="Provide clear visual critique or feedback notes..."
+                    placeholder="Write what you think or what should change..."
                     className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400"
                   />
                 </div>
@@ -625,7 +625,7 @@ export default function InternalDashboard({
                   className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-sans font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                 >
                   <Check className="h-4 w-4" />
-                  Approve Deliverable
+                  Approve
                 </button>
                 <button
                   onClick={() => handleSubmitReview('Rejected')}
@@ -633,7 +633,7 @@ export default function InternalDashboard({
                   className="w-full py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-sans font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                 >
                   <X className="h-4 w-4" />
-                  Request Revisions
+                  Ask for changes
                 </button>
                 <button
                   type="button"
@@ -652,10 +652,10 @@ export default function InternalDashboard({
                   disabled={isReviewSubmitting || !reviewComment.trim()}
                   className="w-full py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-250 text-slate-700 font-sans font-semibold text-xs rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
                 >
-                  {isReviewSubmitting ? 'Processing...' : 'Post Comment Only'}
+                  {isReviewSubmitting ? 'Processing...' : 'Send comment only'}
                 </button>
                 <p className="text-[9px] text-center text-slate-400 font-mono">
-                  Feedback feeds directly to vendor dashboard.
+                  The vendor sees your feedback instantly.
                 </p>
               </div>
             </div>

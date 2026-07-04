@@ -45,7 +45,7 @@ GEMINI_API_KEY=...              # free tier at https://aistudio.google.com/apike
 
 **Reliability:** if you configure more than one key, the server tries them in order (`AI_PROVIDER_ORDER`, default `nvidia,openrouter,gemini`) with a 45-second timeout each — when one provider errors out or hits a rate limit, the next takes over automatically. If every provider fails, vendors get a manual review checklist instead of an error, so the app never breaks.
 
-The System Control Panel (Automation Work tab) shows which providers are detected. Without any key the app still fully works; only AI critiques are replaced by the checklist.
+Without any key the app still fully works; only AI critiques are replaced by the checklist.
 
 ## Production build
 
