@@ -1,7 +1,9 @@
 import { useState, FormEvent } from 'react';
-import { DatabaseState, Task, Deliverable, Vendor, AssetType, TaskStatus, ASSET_TEMPLATES, getDueUrgency } from '../types';
+import { DatabaseState, Task, Deliverable, Vendor, AssetType, TaskStatus, ASSET_TEMPLATES, getDueUrgency, isDirectImage } from '../types';
 import GlassTile from './GlassTile';
-import { Plus, Filter, Clock, CheckCircle, AlertTriangle, User, Layers, ArrowRight, ExternalLink, FileCode, Check, X, Search } from 'lucide-react';
+import TaskDetailModal from './TaskDetailModal';
+import VendorsPanel from './VendorsPanel';
+import { Plus, Filter, Clock, CheckCircle, AlertTriangle, User, Layers, ArrowRight, ExternalLink, FileCode, Check, X, Search, LayoutGrid, Users } from 'lucide-react';
 
 interface InternalDashboardProps {
   dbState: DatabaseState;
@@ -17,6 +19,11 @@ interface InternalDashboardProps {
   onReviewDeliverable: (deliverableId: string, status: 'Approved' | 'Rejected', comment: string) => Promise<void>;
   onUpdateTaskStatus: (taskId: string, status: TaskStatus) => Promise<void>;
   onPostFeedback: (deliverableId: string, comment: string) => Promise<void>;
+  onPostTaskComment: (taskId: string, comment: string) => Promise<boolean>;
+  onEditTask: (taskId: string, fields: Record<string, string>) => Promise<boolean>;
+  onDeleteTask: (taskId: string) => Promise<boolean>;
+  onAddVendor: (fields: Record<string, string>) => Promise<boolean>;
+  onEditVendor: (vendorId: string, fields: Record<string, string>) => Promise<boolean>;
 }
 
 export default function InternalDashboard({
@@ -25,8 +32,19 @@ export default function InternalDashboard({
   onReviewDeliverable,
   onUpdateTaskStatus,
   onPostFeedback,
+  onPostTaskComment,
+  onEditTask,
+  onDeleteTask,
+  onAddVendor,
+  onEditVendor,
 }: InternalDashboardProps) {
-  const { tasks = [], vendors = [], deliverables = [] } = dbState;
+  const { tasks = [], vendors = [], deliverables = [], users = [] } = dbState;
+
+  // Board vs. vendor management view
+  const [view, setView] = useState<'board' | 'vendors'>('board');
+
+  // Task detail modal (opens for any card)
+  const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
 
   // UI state filters
   const [filterAssetType, setFilterAssetType] = useState<string>('ALL');
@@ -148,8 +166,44 @@ export default function InternalDashboard({
     ? deliverables.find(d => d.Deliverable_ID === reviewingDeliverable.Deliverable_ID) || reviewingDeliverable
     : null;
 
+  // Derived detail task so edits/comments refresh live
+  const detailTask = detailTaskId ? tasks.find(t => t.Task_ID === detailTaskId) || null : null;
+
   return (
     <div id="internal-dashboard" className="space-y-6 animate-fade-in">
+
+      {/* Board / Vendors view toggle */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setView('board')}
+          className={`py-2 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+            view === 'board' ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <LayoutGrid className="h-4 w-4" />
+          Requests
+        </button>
+        <button
+          onClick={() => setView('vendors')}
+          className={`py-2 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+            view === 'vendors' ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <Users className="h-4 w-4" />
+          Vendors ({vendors.length})
+        </button>
+      </div>
+
+      {view === 'vendors' ? (
+        <VendorsPanel
+          vendors={vendors}
+          users={users}
+          tasks={tasks}
+          onAddVendor={onAddVendor}
+          onEditVendor={onEditVendor}
+        />
+      ) : (
+      <>
       
       {/* Portfolio Quick Stats (Sleek High Contrast Cards) */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -270,7 +324,10 @@ export default function InternalDashboard({
       <div className="overflow-x-auto pb-4">
         <div className="flex gap-4 min-w-[1100px] h-[580px] select-none">
           {columns.map(col => {
-            const colTasks = filteredTasks.filter(t => t.Status === col.status);
+            // Most urgent first within each column
+            const colTasks = filteredTasks
+              .filter(t => t.Status === col.status)
+              .sort((a, b) => a.Due_Date.localeCompare(b.Due_Date));
             return (
               <div
                 key={col.status}
@@ -306,12 +363,7 @@ export default function InternalDashboard({
                               ? 'border-rose-300 hover:border-rose-400'
                               : 'border-slate-200 hover:border-slate-300'
                           }`}
-                          onClick={() => {
-                            // Any task with a submitted file can be inspected/reviewed
-                            if (latestDel) {
-                              setReviewingDeliverable(latestDel);
-                            }
-                          }}
+                          onClick={() => setDetailTaskId(task.Task_ID)}
                         >
                           {/* Asset badge & Type */}
                           <div className="flex items-center justify-between mb-2">
@@ -397,6 +449,9 @@ export default function InternalDashboard({
           })}
         </div>
       </div>
+
+      </>
+      )}
 
       {/* Slide-over or Frosted Glass Pop-up: Create New Creative Request */}
       {showCreateModal && (
@@ -546,14 +601,29 @@ export default function InternalDashboard({
                 Design
               </span>
 
-              {/* Image rendering */}
+              {/* Image preview for direct images; open-link card for share links (OneDrive/Drive/...) */}
               <div className="w-full h-full flex items-center justify-center p-2">
-                <img
-                  src={currentReviewingDeliverable.File_URL}
-                  alt={currentReviewingDeliverable.File_Name}
-                  referrerPolicy="no-referrer"
-                  className="max-h-[380px] max-w-full rounded-lg object-contain shadow-xs border border-slate-200"
-                />
+                {isDirectImage(currentReviewingDeliverable.File_URL) ? (
+                  <img
+                    src={currentReviewingDeliverable.File_URL}
+                    alt={currentReviewingDeliverable.File_Name}
+                    referrerPolicy="no-referrer"
+                    className="max-h-[380px] max-w-full rounded-lg object-contain shadow-xs border border-slate-200"
+                  />
+                ) : (
+                  <a
+                    href={currentReviewingDeliverable.File_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex flex-col items-center gap-3 p-8 bg-white border border-slate-200 hover:border-slate-400 rounded-xl shadow-xs transition-all text-center"
+                  >
+                    <ExternalLink className="h-8 w-8 text-slate-400" />
+                    <span className="font-bold text-sm text-slate-800">Open design ↗</span>
+                    <span className="text-xs text-slate-500 max-w-[220px] break-all">
+                      This design is a shared link (OneDrive / Drive / Dropbox). Click to open it in a new tab.
+                    </span>
+                  </a>
+                )}
               </div>
 
               <div className="text-center font-mono text-[10px] text-slate-500 shrink-0 pt-2 border-t border-slate-100 truncate">
@@ -629,11 +699,12 @@ export default function InternalDashboard({
                 </button>
                 <button
                   onClick={() => handleSubmitReview('Rejected')}
-                  disabled={isReviewSubmitting}
-                  className="w-full py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-sans font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  disabled={isReviewSubmitting || !reviewComment.trim()}
+                  title={!reviewComment.trim() ? 'Write what needs to change first' : undefined}
+                  className="w-full py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-sans font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <X className="h-4 w-4" />
-                  Ask for changes
+                  {reviewComment.trim() ? 'Ask for changes' : 'Ask for changes (write a comment first)'}
                 </button>
                 <button
                   type="button"
@@ -661,6 +732,20 @@ export default function InternalDashboard({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Full request detail: edit, cancel, question thread, versions */}
+      {detailTask && !currentReviewingDeliverable && (
+        <TaskDetailModal
+          task={detailTask}
+          vendors={vendors}
+          deliverables={getTaskDeliverables(detailTask.Task_ID)}
+          onClose={() => setDetailTaskId(null)}
+          onEdit={onEditTask}
+          onDelete={onDeleteTask}
+          onPostComment={onPostTaskComment}
+          onOpenDeliverable={(del) => setReviewingDeliverable(del)}
+        />
       )}
 
     </div>

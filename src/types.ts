@@ -31,6 +31,9 @@ export interface Task {
   BrandGuidelines: string;
   Requirements: string;
   Created_At: string;
+  // Task-level conversation so questions can be asked before any design
+  // is submitted (deliverables have their own per-version threads)
+  Comments?: FeedbackItem[];
 }
 
 export interface FeedbackItem {
@@ -75,6 +78,18 @@ export interface DatabaseState {
   deliverables: Deliverable[];
   logs: NotificationLog[];
   user?: User;
+}
+
+// True when a URL points at an image we can render inline; false for share
+// links (OneDrive, Google Drive, Dropbox, ...) that should open in a new tab.
+export function isDirectImage(url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (/\.(png|jpe?g|gif|webp|svg|avif)($|\?)/i.test(u.pathname + u.search)) return true;
+    return /(^|\.)images\.unsplash\.com$/i.test(u.hostname);
+  } catch {
+    return false;
+  }
 }
 
 // Deadline urgency for a task, shown as badges in both dashboards.

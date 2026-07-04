@@ -9,6 +9,7 @@ interface VendorPortalProps {
   onUpdateTaskStatus: (taskId: string, status: TaskStatus) => Promise<void>;
   onRequestAICritique: (deliverableId: string, summary: string) => Promise<string>;
   onPostFeedback: (deliverableId: string, comment: string) => Promise<void>;
+  onPostTaskComment: (taskId: string, comment: string) => Promise<boolean>;
 }
 
 export default function VendorPortal({
@@ -17,6 +18,7 @@ export default function VendorPortal({
   onUpdateTaskStatus,
   onRequestAICritique,
   onPostFeedback,
+  onPostTaskComment,
 }: VendorPortalProps) {
   const { tasks = [], deliverables = [], user } = dbState;
 
@@ -37,6 +39,10 @@ export default function VendorPortal({
   // Threaded reply inputs per deliverable
   const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
   const [isReplySubmitting, setIsReplySubmitting] = useState<Record<string, boolean>>({});
+
+  // Question/note input on the request itself
+  const [taskCommentInput, setTaskCommentInput] = useState('');
+  const [isTaskCommentSending, setIsTaskCommentSending] = useState(false);
 
   // Pre-seed mock image choices for easy vendor demo submissions
   const UNSPASH_MOCK_ASSETS = [
@@ -330,6 +336,53 @@ export default function VendorPortal({
                     <span className="text-[10px] font-mono text-slate-400 uppercase block font-bold mt-1.5">What it must include:</span>
                     <span className="text-slate-800">{selectedTask.Requirements}</span>
                   </div>
+                </div>
+
+                {/* Questions & notes on the request itself — ask before you start */}
+                <div className="space-y-2">
+                  <h4 className="text-[10px] font-mono text-slate-500 uppercase tracking-wider font-bold">
+                    💬 QUESTIONS & NOTES ({(selectedTask.Comments ?? []).length})
+                  </h4>
+                  {(selectedTask.Comments ?? []).length > 0 && (
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2 max-h-[140px] overflow-y-auto">
+                      {(selectedTask.Comments ?? []).map(c => (
+                        <div key={c.id} className="text-xs">
+                          <div className="flex justify-between items-center text-[10px] mb-0.5">
+                            <span className="font-semibold text-slate-700">{c.reviewer}</span>
+                            <span className="text-slate-400">{new Date(c.date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                          </div>
+                          <p className="text-slate-600 whitespace-pre-wrap">{c.comment}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!taskCommentInput.trim()) return;
+                      setIsTaskCommentSending(true);
+                      const ok = await onPostTaskComment(selectedTask.Task_ID, taskCommentInput.trim());
+                      setIsTaskCommentSending(false);
+                      if (ok) setTaskCommentInput('');
+                    }}
+                    className="flex gap-1.5"
+                  >
+                    <input
+                      type="text"
+                      placeholder="Ask a question about this request..."
+                      value={taskCommentInput}
+                      onChange={(e) => setTaskCommentInput(e.target.value)}
+                      disabled={isTaskCommentSending}
+                      className="flex-1 bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-slate-400 placeholder:text-slate-400 disabled:opacity-50"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isTaskCommentSending || !taskCommentInput.trim()}
+                      className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
+                    >
+                      {isTaskCommentSending ? '...' : 'Ask'}
+                    </button>
+                  </form>
                 </div>
 
                 {/* Submission Block */}

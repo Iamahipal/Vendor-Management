@@ -261,6 +261,51 @@ export default function App() {
     }
   };
 
+  // Generic small helper for JSON calls that just need success/failure + refresh
+  const apiAction = async (path: string, method: string, body?: unknown, failMsg = 'Action failed.'): Promise<boolean> => {
+    try {
+      const res = await apiFetch(path, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'x-simulated-user-id': selectedUserId
+        },
+        body: body === undefined ? undefined : JSON.stringify(body)
+      });
+      if (res.ok) {
+        await fetchDb();
+        return true;
+      }
+      const err = await res.json();
+      pushErrorAlert(err.error || failMsg);
+      return false;
+    } catch (e) {
+      console.error(e);
+      pushErrorAlert('Network error: ' + failMsg);
+      return false;
+    }
+  };
+
+  // API Call: Post a question/note on the request itself
+  const handlePostTaskComment = (taskId: string, comment: string) =>
+    apiAction(`/api/tasks/${taskId}/comments`, 'POST', { comment }, 'could not send your note.');
+
+  // API Call: Edit a request (internal)
+  const handleEditTask = (taskId: string, fields: Record<string, string>) =>
+    apiAction(`/api/tasks/${taskId}`, 'PATCH', fields, 'could not save changes.');
+
+  // API Call: Cancel & remove a request (internal)
+  const handleDeleteTask = (taskId: string) =>
+    apiAction(`/api/tasks/${taskId}`, 'DELETE', undefined, 'could not cancel the request.');
+
+  // API Call: Add a vendor with contact person (internal)
+  const handleAddVendor = (fields: Record<string, string>) =>
+    apiAction('/api/vendors', 'POST', fields, 'could not add the vendor.');
+
+  // API Call: Edit a vendor / contact person (internal)
+  const handleEditVendor = (vendorId: string, fields: Record<string, string>) =>
+    apiAction(`/api/vendors/${vendorId}`, 'PATCH', fields, 'could not save vendor details.');
+
   // API Call: Post back-and-forth feedback comment on a deliverable
   const handlePostFeedback = async (deliverableId: string, comment: string) => {
     try {
@@ -450,6 +495,11 @@ export default function App() {
                 onReviewDeliverable={handleReviewDeliverable}
                 onUpdateTaskStatus={handleUpdateTaskStatus}
                 onPostFeedback={handlePostFeedback}
+                onPostTaskComment={handlePostTaskComment}
+                onEditTask={handleEditTask}
+                onDeleteTask={handleDeleteTask}
+                onAddVendor={handleAddVendor}
+                onEditVendor={handleEditVendor}
               />
             ) : (
               <VendorPortal
@@ -458,6 +508,7 @@ export default function App() {
                 onUpdateTaskStatus={handleUpdateTaskStatus}
                 onRequestAICritique={handleRequestAICritique}
                 onPostFeedback={handlePostFeedback}
+                onPostTaskComment={handlePostTaskComment}
               />
             )}
             
