@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
-import { ASSET_TEMPLATES, DatabaseState, Task, Deliverable, User, NotificationLog, TaskStatus, AssetType } from './src/types';
+import { ASSET_TEMPLATES, DatabaseState, Task, Deliverable, User, Vendor, NotificationLog, TaskStatus, AssetType } from './src/types';
 import { DEFAULT_DB } from './src/seed';
 
 const app = express();
@@ -191,7 +191,13 @@ function loadDbFromDisk(): DatabaseState {
   return structuredClone(DEFAULT_DB);
 }
 
-const db: DatabaseState = loadDbFromDisk();
+// Migrate records created before task-level conversations existed
+function migrateDb(state: DatabaseState): DatabaseState {
+  state.tasks.forEach(t => { t.Comments ??= []; });
+  return state;
+}
+
+const db: DatabaseState = migrateDb(loadDbFromDisk());
 
 let persistTimer: NodeJS.Timeout | null = null;
 let writeChain: Promise<void> = Promise.resolve();
@@ -521,6 +527,236 @@ app.post('/api/tasks/:id/status', getSecurityContext, (req, res) => {
   res.json({ task, log: newLog });
 });
 
+// Post a comment on the request itself (so vendors can ask questions before
+// any design exists — deliverables have their own per-version threads)
+app.post('/api/tasks/:id/comments', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  const { comment } = (req.body ?? {}) as { comment?: string };
+
+  if (typeof comment !== 'string' || !comment.trim()) {
+    return res.status(400).json({ error: 'Validation Error: Comment content is required.' });
+  }
+
+  const task = db.tasks.find(t => t.Task_ID === req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found.' });
+
+  if (user.Role === 'Vendor' && task.Assigned_Vendor_ID !== user.Vendor_ID) {
+    return res.status(403).json({ error: 'RLS Blocked: You can only comment on requests assigned to your agency.' });
+  }
+
+  const trimmed = comment.trim();
+  (task.Comments ??= []).push({
+    id: newId('c'),
+    reviewer: user.Name,
+    comment: trimmed,
+    date: new Date().toISOString(),
+    source: 'Human'
+  });
+
+  pushLog({
+    id: newId('l'),
+    timestamp: new Date().toISOString(),
+    type: 'system_template',
+    message: `💬 Question/note on request "${task.Title}" from ${user.Name}: "${trimmed.length > 80 ? trimmed.slice(0, 80) + '...' : trimmed}"`,
+    meta: { taskId: task.Task_ID, taskTitle: task.Title, vendorId: task.Assigned_Vendor_ID }
+  });
+
+  pushLiveEvent({
+    title: `💬 Note on "${task.Title.length > 30 ? task.Title.slice(0, 30) + '...' : task.Title}"`,
+    message: `${user.Name}: "${trimmed.length > 55 ? trimmed.slice(0, 55) + '...' : trimmed}"`,
+    taskId: task.Task_ID,
+    vendorId: task.Assigned_Vendor_ID,
+    vendorName: vendorName(task.Assigned_Vendor_ID)
+  });
+
+  persist();
+  res.json({ task });
+});
+
+// Edit a request (internal only): title, due date, vendor, specs
+app.patch('/api/tasks/:id', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Internal') {
+    return res.status(403).json({ error: 'RLS Reject: Only internal staff can edit requests.' });
+  }
+
+  const task = db.tasks.find(t => t.Task_ID === req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found.' });
+
+  const { Title, Due_Date, Assigned_Vendor_ID, Dimensions, BrandGuidelines, Requirements } = (req.body ?? {}) as Partial<Task>;
+  const changes: string[] = [];
+
+  if (Title !== undefined) {
+    if (typeof Title !== 'string' || !Title.trim()) return res.status(400).json({ error: 'Validation Error: Title cannot be empty.' });
+    if (Title.trim() !== task.Title) { changes.push(`title → "${Title.trim()}"`); task.Title = Title.trim(); }
+  }
+  if (Due_Date !== undefined && Due_Date !== task.Due_Date) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(Due_Date) || isNaN(new Date(Due_Date).getTime())) {
+      return res.status(400).json({ error: 'Validation Error: Due_Date must be a valid YYYY-MM-DD date.' });
+    }
+    if (new Date(Due_Date + 'T23:59:59.000Z').getTime() < Date.now()) {
+      return res.status(400).json({ error: 'Validation Error: Due_Date is in the past. Please pick a future date.' });
+    }
+    changes.push(`due date → ${Due_Date}`);
+    task.Due_Date = Due_Date;
+  }
+  if (Assigned_Vendor_ID !== undefined && Assigned_Vendor_ID !== task.Assigned_Vendor_ID) {
+    const vendor = db.vendors.find(v => v.Vendor_ID === Assigned_Vendor_ID);
+    if (!vendor) return res.status(400).json({ error: 'Validation Error: Specified vendor does not exist.' });
+    changes.push(`vendor → ${vendor.Company_Name}`);
+    task.Assigned_Vendor_ID = Assigned_Vendor_ID;
+  }
+  if (Dimensions !== undefined && Dimensions !== task.Dimensions) { task.Dimensions = Dimensions; changes.push('size updated'); }
+  if (BrandGuidelines !== undefined && BrandGuidelines !== task.BrandGuidelines) { task.BrandGuidelines = BrandGuidelines; changes.push('guidelines updated'); }
+  if (Requirements !== undefined && Requirements !== task.Requirements) { task.Requirements = Requirements; changes.push('requirements updated'); }
+
+  if (changes.length > 0) {
+    pushLog({
+      id: newId('l'),
+      timestamp: new Date().toISOString(),
+      type: 'system_template',
+      message: `✏️ Request "${task.Title}" updated by ${user.Name}: ${changes.join(', ')}.`,
+      meta: { taskId: task.Task_ID, taskTitle: task.Title, vendorId: task.Assigned_Vendor_ID }
+    });
+    pushLiveEvent({
+      title: '✏️ Request Updated',
+      message: `"${task.Title}": ${changes.join(', ')}.`,
+      taskId: task.Task_ID,
+      vendorId: task.Assigned_Vendor_ID,
+      vendorName: vendorName(task.Assigned_Vendor_ID)
+    });
+    persist();
+  }
+
+  res.json({ task, changed: changes });
+});
+
+// Cancel & remove a request (internal only) along with its deliverables
+app.delete('/api/tasks/:id', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Internal') {
+    return res.status(403).json({ error: 'RLS Reject: Only internal staff can cancel requests.' });
+  }
+
+  const idx = db.tasks.findIndex(t => t.Task_ID === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Task not found.' });
+
+  const [removed] = db.tasks.splice(idx, 1);
+  db.deliverables = db.deliverables.filter(d => d.Task_ID !== removed.Task_ID);
+
+  pushLog({
+    id: newId('l'),
+    timestamp: new Date().toISOString(),
+    type: 'system_template',
+    message: `🗑️ Request "${removed.Title}" was cancelled and removed by ${user.Name}.`,
+    meta: { taskId: removed.Task_ID, taskTitle: removed.Title, vendorId: removed.Assigned_Vendor_ID }
+  });
+  pushLiveEvent({
+    title: '🗑️ Request Cancelled',
+    message: `"${removed.Title}" has been cancelled — no further work needed.`,
+    taskId: removed.Task_ID,
+    vendorId: removed.Assigned_Vendor_ID,
+    vendorName: vendorName(removed.Assigned_Vendor_ID)
+  });
+
+  persist();
+  res.json({ removed: removed.Task_ID });
+});
+
+// -------------------------------------------------------------
+// VENDOR MANAGEMENT (internal only)
+// -------------------------------------------------------------
+
+// Add a vendor together with their contact login (the persona switcher and
+// future auth both need a User per vendor contact)
+app.post('/api/vendors', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Internal') {
+    return res.status(403).json({ error: 'RLS Reject: Only internal staff can manage vendors.' });
+  }
+
+  const { Company_Name, Specialty, Contact_Name, Contact_Email } = (req.body ?? {}) as Record<string, string>;
+  if (!Company_Name?.trim() || !Contact_Name?.trim() || !Contact_Email?.trim()) {
+    return res.status(400).json({ error: 'Validation Error: Company name, contact name and contact email are required.' });
+  }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(Contact_Email.trim())) {
+    return res.status(400).json({ error: 'Validation Error: Contact email does not look valid.' });
+  }
+  if (db.vendors.some(v => v.Company_Name.toLowerCase() === Company_Name.trim().toLowerCase())) {
+    return res.status(400).json({ error: 'Validation Error: A vendor with this company name already exists.' });
+  }
+
+  const vendor: Vendor = {
+    Vendor_ID: newId('v'),
+    Company_Name: Company_Name.trim(),
+    Specialty: Specialty?.trim() || 'Creative design',
+    Logo: ''
+  };
+  db.vendors.push(vendor);
+
+  const contact: User = {
+    User_ID: newId('u'),
+    Name: Contact_Name.trim(),
+    Email: Contact_Email.trim(),
+    Role: 'Vendor',
+    Vendor_ID: vendor.Vendor_ID,
+    Avatar: `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(Contact_Name.trim())}`
+  };
+  db.users.push(contact);
+
+  pushLog({
+    id: newId('l'),
+    timestamp: new Date().toISOString(),
+    type: 'system_template',
+    message: `🤝 New vendor added: ${vendor.Company_Name} (contact: ${contact.Name}, ${contact.Email}).`,
+    meta: { vendorId: vendor.Vendor_ID, vendorName: vendor.Company_Name }
+  });
+
+  persist();
+  res.status(201).json({ vendor, contact });
+});
+
+// Edit a vendor and optionally its contact person
+app.patch('/api/vendors/:id', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Internal') {
+    return res.status(403).json({ error: 'RLS Reject: Only internal staff can manage vendors.' });
+  }
+
+  const vendor = db.vendors.find(v => v.Vendor_ID === req.params.id);
+  if (!vendor) return res.status(404).json({ error: 'Vendor not found.' });
+
+  const { Company_Name, Specialty, Contact_Name, Contact_Email } = (req.body ?? {}) as Record<string, string>;
+
+  if (Company_Name !== undefined) {
+    if (!Company_Name.trim()) return res.status(400).json({ error: 'Validation Error: Company name cannot be empty.' });
+    vendor.Company_Name = Company_Name.trim();
+  }
+  if (Specialty !== undefined) vendor.Specialty = Specialty.trim();
+
+  const contact = db.users.find(u => u.Role === 'Vendor' && u.Vendor_ID === vendor.Vendor_ID);
+  if (contact) {
+    if (Contact_Name !== undefined && Contact_Name.trim()) contact.Name = Contact_Name.trim();
+    if (Contact_Email !== undefined && Contact_Email.trim()) {
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(Contact_Email.trim())) {
+        return res.status(400).json({ error: 'Validation Error: Contact email does not look valid.' });
+      }
+      contact.Email = Contact_Email.trim();
+    }
+  }
+
+  pushLog({
+    id: newId('l'),
+    timestamp: new Date().toISOString(),
+    type: 'system_template',
+    message: `✏️ Vendor "${vendor.Company_Name}" details updated by ${user.Name}.`,
+    meta: { vendorId: vendor.Vendor_ID, vendorName: vendor.Company_Name }
+  });
+
+  persist();
+  res.json({ vendor, contact: contact ?? null });
+});
+
 // Submit Deliverable (Upload simulating version control)
 app.post('/api/deliverables', getSecurityContext, (req, res) => {
   const user = (req as AuthedRequest).user;
@@ -603,6 +839,11 @@ app.post('/api/deliverables/:id/review', getSecurityContext, (req, res) => {
 
   if (status !== 'Approved' && status !== 'Rejected') {
     return res.status(400).json({ error: "Validation Error: status must be 'Approved' or 'Rejected'." });
+  }
+
+  // Rejections without an explanation leave the vendor guessing
+  if (status === 'Rejected' && (!comment || !comment.trim())) {
+    return res.status(400).json({ error: 'Please tell the vendor what needs to change — a comment is required when asking for changes.' });
   }
 
   const deliverable = db.deliverables.find(d => d.Deliverable_ID === deliverableId);
