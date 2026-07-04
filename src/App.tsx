@@ -1,23 +1,17 @@
 import { useEffect, useState, useRef } from 'react';
 import { DatabaseState, User, TaskStatus, AssetType } from './types';
 import { DEMO_MODE, demoFetch, resetDemoDb } from './demoApi';
-import GlassTile from './components/GlassTile';
 import InternalDashboard from './components/InternalDashboard';
 import VendorPortal from './components/VendorPortal';
-import SystemControlPanel from './components/SystemControlPanel';
-import { 
-  ShieldCheck, 
-  Layers, 
-  Activity, 
-  Cpu, 
-  UserCheck, 
-  RefreshCw, 
-  Sliders, 
-  X, 
-  Bell, 
-  Sparkles, 
-  AlertTriangle,
-  Lock,
+import HelpGuide from './components/HelpGuide';
+import ActivityFeed from './components/ActivityFeed';
+import {
+  UserCheck,
+  RefreshCw,
+  X,
+  Bell,
+  Sparkles,
+  HelpCircle,
   Compass
 } from 'lucide-react';
 
@@ -46,8 +40,20 @@ export default function App() {
   // active selected user persona (Sarah Jenkins is default internal staff admin)
   const [selectedUserId, setSelectedUserId] = useState<string>('u-pfl-admin');
   const [loading, setLoading] = useState(true);
-  const [isCronRunning, setIsCronRunning] = useState(false);
-  const [showSimulator, setShowSimulator] = useState(true);
+
+  // Step-by-step guide: opens automatically on the very first visit
+  const [showGuide, setShowGuide] = useState<boolean>(() => {
+    try {
+      return !localStorage.getItem('creativeflow-guide-seen');
+    } catch {
+      return false;
+    }
+  });
+
+  const closeGuide = () => {
+    setShowGuide(false);
+    try { localStorage.setItem('creativeflow-guide-seen', '1'); } catch { /* private mode */ }
+  };
 
   // Live Toast notifications queue
   const [alerts, setAlerts] = useState<AlertNotification[]>([]);
@@ -255,30 +261,6 @@ export default function App() {
     }
   };
 
-  // API Call: Run Cron Reminders
-  const handleSimulateCron = async () => {
-    setIsCronRunning(true);
-    try {
-      const res = await apiFetch('/api/simulate-cron', {
-        method: 'POST',
-        headers: {
-          'x-simulated-user-id': selectedUserId
-        }
-      });
-      if (res.ok) {
-        await fetchDb();
-      } else {
-        const err = await res.json();
-        pushErrorAlert(err.error || 'Failed to run automation scan.');
-      }
-    } catch (e) {
-      console.error(e);
-      pushErrorAlert('Network error: failed to run automation scan.');
-    } finally {
-      setIsCronRunning(false);
-    }
-  };
-
   // API Call: Post back-and-forth feedback comment on a deliverable
   const handlePostFeedback = async (deliverableId: string, comment: string) => {
     try {
@@ -375,21 +357,25 @@ export default function App() {
             <Compass className="h-5 w-5 text-white" />
           </div>
           <div>
-            <h1 className="font-sans font-bold text-sm tracking-tight text-slate-900 flex items-center gap-2">
+            <h1 className="font-sans font-bold text-base tracking-tight text-slate-900">
               CreativeFlow Hub
-              <span className="text-[10px] font-mono bg-blue-50 border border-blue-200 text-blue-600 px-2 py-0.5 rounded-full font-bold">
-                PARTNERS & PIPELINE
-              </span>
             </h1>
-            <p className="text-[10px] text-slate-500 font-medium">Relational Collaborative Asset Pipeline</p>
+            <p className="text-xs text-slate-500 font-medium">Design work with your vendors, in one place</p>
           </div>
+          <button
+            onClick={() => setShowGuide(true)}
+            className="ml-2 py-1.5 px-3 bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 hover:text-slate-900 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+          >
+            <HelpCircle className="h-3.5 w-3.5" />
+            How it works
+          </button>
         </div>
 
-        {/* Real-time security context switching header */}
+        {/* Persona switcher (demo) */}
         <div className="flex flex-wrap lg:flex-nowrap items-center gap-2 bg-slate-100 border border-slate-200 p-1.5 rounded-xl w-full lg:w-auto">
-          <div className="text-[10px] font-mono text-slate-500 uppercase font-bold px-2 flex items-center gap-1">
+          <div className="text-xs text-slate-500 font-semibold px-2 flex items-center gap-1">
             <UserCheck className="h-3.5 w-3.5 text-slate-600" />
-            Active Role:
+            Viewing as:
           </div>
 
           <div className="grid grid-cols-2 sm:flex gap-1 w-full sm:w-auto">
@@ -440,44 +426,19 @@ export default function App() {
           </div>
         )}
 
-        {/* Isolated Vault Guard Notification */}
+        {/* Friendly greeting instead of security jargon banners */}
         {currentUser && (
-          <div className={`p-4 rounded-xl border flex items-start sm:items-center justify-between gap-4 shadow-xs ${
-            currentUser.Role === 'Vendor'
-              ? 'bg-amber-50 border-amber-200 text-amber-900'
-              : 'bg-blue-50 border-blue-200 text-blue-900'
-          }`}>
-            <div className="flex items-center gap-3">
-              <div className={`p-1.5 rounded-lg border shrink-0 ${
-                currentUser.Role === 'Vendor' 
-                  ? 'bg-amber-100 border-amber-300 text-amber-700' 
-                  : 'bg-blue-100 border-blue-300 text-blue-700'
-              }`}>
-                <ShieldCheck className="h-4.5 w-4.5" />
-              </div>
-              <div className="text-xs">
-                <span className="font-bold uppercase tracking-wide font-mono block mb-0.5 text-xs">
-                  {currentUser.Role === 'Vendor' ? 'Row-Level Security Active' : 'System Oversight Mode'}
-                </span>
-                <p className="text-slate-600">
-                  {currentUser.Role === 'Vendor'
-                    ? `Isolated Vendor Environment. Showing only creative briefs assigned to your vendor profile: ${dbState.vendors[0]?.Company_Name || 'your agency'}. Other agencies' tasks remain strictly isolated and protected.`
-                    : 'Showing global administrator dashboard. Accessing all collaborative asset briefings, feedback cycles, and system automation.'
-                  }
-                </p>
-              </div>
-            </div>
-
-            <span className="text-[10px] font-mono bg-white/80 border border-slate-200 px-2 py-0.5 rounded-full text-slate-500 shrink-0 hidden sm:inline-block">
-              {currentUser.Role === 'Vendor' ? 'RLS: BOUNDED' : 'ROLE: ADMIN'}
-            </span>
-          </div>
+          <p className="text-sm text-slate-500">
+            {currentUser.Role === 'Vendor'
+              ? `Hi ${currentUser.Name.split(' ')[0]} — here are the requests for ${dbState.vendors[0]?.Company_Name || 'your team'}.`
+              : `Hi ${currentUser.Name.split(' ')[0]} — here's where all your design requests stand.`}
+          </p>
         )}
 
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
             <RefreshCw className="h-6 w-6 text-slate-500 animate-spin" />
-            <span className="text-xs text-slate-400 font-mono">Loading pipeline state...</span>
+            <span className="text-sm text-slate-400">Loading...</span>
           </div>
         ) : (
           <>
@@ -500,34 +461,20 @@ export default function App() {
               />
             )}
             
-            {/* Toggle Button for Security Simulator Drawer */}
-            <div className="flex justify-center pt-4">
-              <button
-                onClick={() => setShowSimulator(!showSimulator)}
-                className="py-2 px-4 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-xl text-xs font-sans font-bold flex items-center gap-2 transition-all cursor-pointer shadow-xs"
-              >
-                <Sliders className="h-4 w-4 text-emerald-600" />
-                {showSimulator ? 'Hide System & Automation Settings' : 'Configure System & Automation Reminders'}
-              </button>
-            </div>
-
-            {/* Embedded Security & Automation Control Panel */}
-            {showSimulator && (
-              <SystemControlPanel
-                dbState={dbState}
-                onSimulateCron={handleSimulateCron}
-                isCronSimulating={isCronRunning}
-                selectedUserId={selectedUserId}
-              />
+            {/* Plain-language recent activity for the internal team */}
+            {currentUser?.Role === 'Internal' && (
+              <ActivityFeed logs={dbState.logs || []} />
             )}
           </>
         )}
       </main>
 
-      {/* Global Footer credits */}
-      <footer className="border-t border-slate-200 bg-slate-100 p-4 text-center text-[10px] font-mono text-slate-500 space-y-1">
-        <div>CreativeFlow Hub • Collaborative Vendor Pipeline Manager</div>
-        <div>Configured with automatic 48-hour delivery reminders and enterprise isolated security policies.</div>
+      {/* Step-by-step guide (auto-opens on first visit) */}
+      {showGuide && <HelpGuide onClose={closeGuide} />}
+
+      {/* Global Footer */}
+      <footer className="border-t border-slate-200 bg-slate-100 p-4 text-center text-xs text-slate-500">
+        CreativeFlow Hub — design requests, reviews and reminders in one place. Reminders are sent automatically when work is due soon or overdue.
       </footer>
     </div>
   );
