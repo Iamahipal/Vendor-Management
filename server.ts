@@ -1031,9 +1031,13 @@ async function bootstrap() {
   });
 
   // Real automation: run the reminder/overdue scan shortly after startup and
-  // then every hour — no manual button press required.
-  setTimeout(() => runReminderScan(new Date()), 10_000);
-  setInterval(() => runReminderScan(new Date()), 60 * 60 * 1000);
+  // then every hour — no manual button press required. Tests set
+  // DISABLE_AUTOMATION_CRON so background scans can't fire mid-assertion;
+  // the /api/simulate-cron trigger still works either way.
+  if (process.env.DISABLE_AUTOMATION_CRON !== 'true') {
+    setTimeout(() => runReminderScan(new Date()), 10_000);
+    setInterval(() => runReminderScan(new Date()), 60 * 60 * 1000);
+  }
 }
 
 bootstrap();

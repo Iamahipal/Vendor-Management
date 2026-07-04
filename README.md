@@ -64,7 +64,14 @@ Production installs only need runtime dependencies (`express`, `@google/genai`, 
 | `npm run build` | Build frontend and bundle server into `dist/` |
 | `npm start` | Run the production bundle |
 | `npm run lint` | Typecheck (`tsc --noEmit`, strict mode) |
+| `npm test` | Run the API test suite (`node:test`, black-box against the real server) |
 | `npm run clean` | Remove build output |
+
+## Testing & CI
+
+`npm test` boots the real Express server in an isolated temp directory (fresh seed database, random port, automation cron disabled via `DISABLE_AUTOMATION_CRON=true`, no AI keys) and exercises the HTTP API end to end: authentication, every RLS read/write rule, input validation, deliverable versioning, cursor-based live-event scoping, the due-soon/overdue cron dedup windows, the AI checklist fallback, and atomic persistence to `data.json`. No test framework dependencies — it uses Node's built-in test runner through `tsx`.
+
+Every pull request and push to `main` runs the full gate in GitHub Actions (`.github/workflows/ci.yml`): typecheck → test suite → production build → static demo build.
 
 ## API overview
 
