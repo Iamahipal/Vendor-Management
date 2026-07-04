@@ -61,7 +61,9 @@ export default function VendorPortal({
   // Filter tasks belonging exclusively to current vendor based on RLS isolation logic,
   // sorted by deadline so the most urgent work is always at the top
   const byDueDate = (a: Task, b: Task) => a.Due_Date.localeCompare(b.Due_Date);
-  const vendorTasks = tasks.filter(t => t.Assigned_Vendor_ID === user?.Vendor_ID).sort(byDueDate);
+  const vendorTasks = tasks
+    .filter(t => t.Assigned_Vendor_ID === user?.Vendor_ID && t.Status !== 'Cancelled')
+    .sort(byDueDate);
   const selectedTask = selectedTaskId ? vendorTasks.find(t => t.Task_ID === selectedTaskId) || null : null;
 
   // 1. "New Requests" -> Tasks in status 'Assigned'

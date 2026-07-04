@@ -43,9 +43,17 @@ function loadDb(): DatabaseState {
   return structuredClone(DEFAULT_DB);
 }
 
-// Migrate records created before task-level conversations existed
+// Migrate records created before task-level conversations / in-house work
 function migrate(db: DatabaseState): DatabaseState {
   db.tasks.forEach(t => { t.Comments ??= []; });
+  if (!db.vendors.some(v => v.Vendor_ID === 'v-inhouse')) {
+    db.vendors.unshift({
+      Vendor_ID: 'v-inhouse',
+      Company_Name: 'In-house Team',
+      Specialty: 'Deployed internally via Snapcoms (wallpapers, tickers, popups)',
+      Logo: ''
+    });
+  }
   return db;
 }
 
@@ -389,25 +397,30 @@ export async function demoFetch(input: string, init?: RequestInit): Promise<Resp
     return json(200, { task, changed: changes });
   }
 
-  // DELETE /api/tasks/:id — cancel & remove a request (internal only)
+  // DELETE /api/tasks/:id — soft-cancel (history is kept forever)
   if (method === 'DELETE' && taskEditMatch) {
     if (user.Role !== 'Internal') return json(403, { error: 'RLS Reject: Only internal staff can cancel requests.' });
-    const idx = db.tasks.findIndex(t => t.Task_ID === taskEditMatch[1]);
-    if (idx === -1) return json(404, { error: 'Task not found.' });
-    const [removed] = db.tasks.splice(idx, 1);
-    db.deliverables = db.deliverables.filter(d => d.Task_ID !== removed.Task_ID);
+    const task = db.tasks.find(t => t.Task_ID === taskEditMatch[1]);
+    if (!task) return json(404, { error: 'Task not found.' });
+    if (task.Status === 'Cancelled') return json(400, { error: 'This request is already cancelled.' });
+    task.Status = 'Cancelled';
     pushLog(db, {
       id: newId('l'), timestamp: new Date().toISOString(), type: 'system_template',
-      message: `🗑️ Request "${removed.Title}" was cancelled and removed by ${user.Name}.`,
-      meta: { taskId: removed.Task_ID, taskTitle: removed.Title, vendorId: removed.Assigned_Vendor_ID }
+      message: `🗑️ Request "${task.Title}" was cancelled by ${user.Name}. It stays in History.`,
+      meta: { taskId: task.Task_ID, taskTitle: task.Title, vendorId: task.Assigned_Vendor_ID }
     });
     pushLiveEvent({
       title: '🗑️ Request Cancelled',
-      message: `"${removed.Title}" has been cancelled — no further work needed.`,
-      taskId: removed.Task_ID, vendorId: removed.Assigned_Vendor_ID, vendorName: vendorName(db, removed.Assigned_Vendor_ID)
+      message: `"${task.Title}" has been cancelled — no further work needed.`,
+      taskId: task.Task_ID, vendorId: task.Assigned_Vendor_ID, vendorName: vendorName(db, task.Assigned_Vendor_ID)
     });
     saveDb(db);
-    return json(200, { removed: removed.Task_ID });
+    return json(200, { removed: task.Task_ID, task });
+  }
+
+  // POST /api/ai/organize-brief — needs private AI keys, unavailable in demo
+  if (method === 'POST' && path === '/api/ai/organize-brief') {
+    return json(502, { error: 'AI brief organizer is offline in this static demo (it needs private API keys). Run the app locally to use it — or fill the form manually.' });
   }
 
   // POST /api/vendors — add vendor + contact login (internal only)
@@ -535,6 +548,9 @@ export async function demoFetch(input: string, init?: RequestInit): Promise<Resp
     if (!task) return json(404, { error: 'Parent task brief not found.' });
     deliverable.Approval_Status = status;
     task.Status = status === 'Approved' ? 'Approved' : 'Needs Revision';
+    if (status === 'Approved') {
+      task.Approved_At = new Date().toISOString();
+    }
     if (comment && comment.trim()) {
       deliverable.Feedback_History.push({
         id: newId('f'), reviewer: user.Name, comment: comment.trim(),

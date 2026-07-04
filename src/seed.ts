@@ -5,6 +5,12 @@ import { DatabaseState } from './types';
 export const DEFAULT_DB: DatabaseState = {
   vendors: [
     {
+      Vendor_ID: 'v-inhouse',
+      Company_Name: 'In-house Team',
+      Specialty: 'Deployed internally via Snapcoms (wallpapers, tickers, popups)',
+      Logo: ''
+    },
+    {
       Vendor_ID: 'v-pixel',
       Company_Name: 'PixelCraft Digital',
       Specialty: 'Social Media & Digital Creatives',

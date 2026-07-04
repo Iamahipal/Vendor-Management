@@ -191,9 +191,17 @@ function loadDbFromDisk(): DatabaseState {
   return structuredClone(DEFAULT_DB);
 }
 
-// Migrate records created before task-level conversations existed
+// Migrate records created before task-level conversations / in-house work
 function migrateDb(state: DatabaseState): DatabaseState {
   state.tasks.forEach(t => { t.Comments ??= []; });
+  if (!state.vendors.some(v => v.Vendor_ID === 'v-inhouse')) {
+    state.vendors.unshift({
+      Vendor_ID: 'v-inhouse',
+      Company_Name: 'In-house Team',
+      Specialty: 'Deployed internally via Snapcoms (wallpapers, tickers, popups)',
+      Logo: ''
+    });
+  }
   return state;
 }
 
@@ -631,36 +639,37 @@ app.patch('/api/tasks/:id', getSecurityContext, (req, res) => {
   res.json({ task, changed: changes });
 });
 
-// Cancel & remove a request (internal only) along with its deliverables
+// Cancel a request (internal only). Soft-cancel: the task and all its history
+// stay in the database forever — long-term record keeping is a core goal.
 app.delete('/api/tasks/:id', getSecurityContext, (req, res) => {
   const user = (req as AuthedRequest).user;
   if (user.Role !== 'Internal') {
     return res.status(403).json({ error: 'RLS Reject: Only internal staff can cancel requests.' });
   }
 
-  const idx = db.tasks.findIndex(t => t.Task_ID === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Task not found.' });
+  const task = db.tasks.find(t => t.Task_ID === req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found.' });
+  if (task.Status === 'Cancelled') return res.status(400).json({ error: 'This request is already cancelled.' });
 
-  const [removed] = db.tasks.splice(idx, 1);
-  db.deliverables = db.deliverables.filter(d => d.Task_ID !== removed.Task_ID);
+  task.Status = 'Cancelled';
 
   pushLog({
     id: newId('l'),
     timestamp: new Date().toISOString(),
     type: 'system_template',
-    message: `🗑️ Request "${removed.Title}" was cancelled and removed by ${user.Name}.`,
-    meta: { taskId: removed.Task_ID, taskTitle: removed.Title, vendorId: removed.Assigned_Vendor_ID }
+    message: `🗑️ Request "${task.Title}" was cancelled by ${user.Name}. It stays in History.`,
+    meta: { taskId: task.Task_ID, taskTitle: task.Title, vendorId: task.Assigned_Vendor_ID }
   });
   pushLiveEvent({
     title: '🗑️ Request Cancelled',
-    message: `"${removed.Title}" has been cancelled — no further work needed.`,
-    taskId: removed.Task_ID,
-    vendorId: removed.Assigned_Vendor_ID,
-    vendorName: vendorName(removed.Assigned_Vendor_ID)
+    message: `"${task.Title}" has been cancelled — no further work needed.`,
+    taskId: task.Task_ID,
+    vendorId: task.Assigned_Vendor_ID,
+    vendorName: vendorName(task.Assigned_Vendor_ID)
   });
 
   persist();
-  res.json({ removed: removed.Task_ID });
+  res.json({ removed: task.Task_ID, task });
 });
 
 // -------------------------------------------------------------
@@ -858,6 +867,9 @@ app.post('/api/deliverables/:id/review', getSecurityContext, (req, res) => {
 
   deliverable.Approval_Status = status;
   task.Status = status === 'Approved' ? 'Approved' : 'Needs Revision';
+  if (status === 'Approved') {
+    task.Approved_At = new Date().toISOString();
+  }
 
   if (comment && comment.trim()) {
     deliverable.Feedback_History.push({
@@ -1095,6 +1107,74 @@ app.post('/api/simulate-cron', getSecurityContext, (req, res) => {
     reminders: triggeredAlerts,
     logs: db.logs
   });
+});
+
+// -------------------------------------------------------------
+// AI BRIEF ORGANIZER
+// Teams send raw requirement text (emails, Teams messages). The AI organizes
+// it into a structured brief WITHOUT changing or inventing content — the
+// internal team reviews the draft before creating the request.
+// -------------------------------------------------------------
+
+app.post('/api/ai/organize-brief', getSecurityContext, async (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Internal') {
+    return res.status(403).json({ error: 'RLS Reject: Only internal staff can use the brief organizer.' });
+  }
+
+  const { rawText } = (req.body ?? {}) as { rawText?: string };
+  if (typeof rawText !== 'string' || rawText.trim().length < 10) {
+    return res.status(400).json({ error: 'Please paste the raw requirement text first (at least a sentence).' });
+  }
+
+  const assetTypeList = Object.keys(ASSET_TEMPLATES).join(', ');
+  const prompt = `You organize raw communication requirements into structured briefs for an internal communications team.
+
+STRICT RULES:
+- Do NOT invent, add, or change any facts, dates, names, numbers or requirements. Only reorganize and lightly polish the wording that is already there.
+- If a field is not mentioned in the raw text, leave it as an empty string — never guess.
+- Keep the original language of specific instructions intact wherever possible.
+
+RAW REQUIREMENT (verbatim, from the requesting team):
+"""
+${rawText.trim().slice(0, 4000)}
+"""
+
+Return ONLY a JSON object (no markdown fences, no commentary) with exactly these keys:
+{
+  "title": "short clear request title drawn from the raw text",
+  "asset_type": "the best match from this exact list, or empty string if unclear: ${assetTypeList}",
+  "dimensions": "any size/format info found in the text, else empty string",
+  "guidelines": "any brand/style/tone instructions found in the text, else empty string",
+  "requirements": "the concrete must-haves found in the text (deadlines mentioned inside the content, mandatory elements, approvals), else empty string",
+  "due_date": "YYYY-MM-DD if a deadline date is stated in the text, else empty string"
+}`;
+
+  try {
+    const { text, provider } = await generateWithFallback(prompt);
+    // Tolerate models that wrap JSON in code fences despite instructions
+    const jsonText = text.replace(/^```(?:json)?/m, '').replace(/```\s*$/m, '').trim();
+    const start = jsonText.indexOf('{');
+    const end = jsonText.lastIndexOf('}');
+    if (start === -1 || end === -1) throw new Error('AI did not return structured data.');
+    const parsed = JSON.parse(jsonText.slice(start, end + 1)) as Record<string, unknown>;
+
+    const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+    const assetType = str(parsed.asset_type);
+    const draft = {
+      title: str(parsed.title),
+      asset_type: (assetType in ASSET_TEMPLATES) ? assetType : '',
+      dimensions: str(parsed.dimensions),
+      guidelines: str(parsed.guidelines),
+      requirements: str(parsed.requirements),
+      due_date: /^\d{4}-\d{2}-\d{2}$/.test(str(parsed.due_date)) ? str(parsed.due_date) : ''
+    };
+
+    res.json({ draft, provider: provider.label });
+  } catch (error) {
+    console.error('Brief organizer failed:', error);
+    res.status(502).json({ error: 'AI could not organize this text right now — please fill the form manually or try again.' });
+  }
 });
 
 // -------------------------------------------------------------
