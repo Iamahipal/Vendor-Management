@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
-import { ASSET_TEMPLATES, DatabaseState, Task, Deliverable, User, Vendor, NotificationLog, TaskStatus, AssetType } from './src/types';
+import { ASSET_TEMPLATES, DatabaseState, Task, Deliverable, User, Vendor, NotificationLog, TaskStatus, AssetType, Communication, COMMS_CHANNELS, CHANNEL_ASSET_TYPE, INHOUSE_VENDOR_ID, AUDIENCES, WeeklyPlacement, PLACEMENT_SURFACES, Webinar } from './src/types';
 import { DEFAULT_DB } from './src/seed';
 
 const app = express();
@@ -182,6 +182,9 @@ function loadDbFromDisk(): DatabaseState {
         users: parsed.users ?? [],
         tasks: parsed.tasks ?? [],
         deliverables: parsed.deliverables ?? [],
+        communications: parsed.communications ?? [],
+        placements: parsed.placements ?? [],
+        webinars: parsed.webinars ?? [],
         logs: parsed.logs ?? []
       };
     }
@@ -193,6 +196,14 @@ function loadDbFromDisk(): DatabaseState {
 
 // Migrate records created before task-level conversations / in-house work
 function migrateDb(state: DatabaseState): DatabaseState {
+  state.communications ??= [];
+  state.placements ??= [];
+  state.webinars ??= [];
+  // Older communications used single Language/Email channel
+  state.communications.forEach((c: any) => {
+    if (!c.Languages) c.Languages = c.Language ? [c.Language] : ['English'];
+    if (c.Channel === 'Email') c.Channel = 'Mail';
+  });
   state.tasks.forEach(t => { t.Comments ??= []; });
   if (!state.vendors.some(v => v.Vendor_ID === 'v-inhouse')) {
     state.vendors.unshift({
@@ -342,6 +353,13 @@ app.get('/api/db', getSecurityContext, (req, res) => {
   let allowedVendors = db.vendors;
   let allowedLogs = db.logs;
   let visibleUsers = db.users;
+  // Calendar is IC-only; the Release SPOC sees only what's been handed to them.
+  let allowedCommunications =
+    user.Role === 'Internal'
+      ? db.communications
+      : user.Role === 'Release'
+        ? db.communications.filter(c => c.Status === 'Handed Off' || c.Status === 'Released')
+        : [];
 
   rlsLogs.push(`User Authenticated: ${user.Name} (${user.Role})`);
 
@@ -378,6 +396,10 @@ app.get('/api/db', getSecurityContext, (req, res) => {
     vendors: allowedVendors,
     tasks: allowedTasks,
     deliverables: allowedDeliverables,
+    communications: allowedCommunications,
+    // Weekly placements & webinars are IC-only planning surfaces
+    placements: user.Role === 'Internal' ? db.placements : [],
+    webinars: user.Role === 'Internal' ? db.webinars : [],
     logs: allowedLogs,
     aiProviders: configuredProviders().map(p => p.label),
     rlsSimulation: {
@@ -766,6 +788,402 @@ app.patch('/api/vendors/:id', getSecurityContext, (req, res) => {
   res.json({ vendor, contact: contact ?? null });
 });
 
+// -------------------------------------------------------------
+// CALENDAR / RELEASE PIPELINE (IC books, SPOC releases)
+// -------------------------------------------------------------
+
+// Hard scheduling conflicts (soft frequency/day warnings are computed on the
+// client). Returns an error message, or null if the slot is free.
+function slotConflict(date: string, time: string, channel: string, ignoreId?: string): string | null {
+  const active = db.communications.filter(c => c.Status !== 'Cancelled' && c.Comm_ID !== ignoreId && c.Release_Date === date);
+  const same = active.find(c => c.Release_Time === time && c.Channel === channel);
+  if (same) return `That slot is already taken: ${channel} on ${date} at ${time} ("${same.Campaign_Name}"). Pick another slot.`;
+  // Ticker and Pop-up can't go at the same time
+  if (channel === 'Ticker' || channel === 'Desktop Pop-up') {
+    const other = channel === 'Ticker' ? 'Desktop Pop-up' : 'Ticker';
+    const clash = active.find(c => c.Release_Time === time && c.Channel === other);
+    if (clash) return `Ticker and Pop-up can't go at the same time. "${clash.Campaign_Name}" (${other}) is already at ${time}.`;
+  }
+  return null;
+}
+
+// Book a slot (IC only). One booking per (date, time, channel).
+app.post('/api/communications', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Internal') {
+    return res.status(403).json({ error: 'Only the IC team can book calendar slots.' });
+  }
+
+  const b = (req.body ?? {}) as Partial<Communication>;
+  const isBlock = b.Blocked === true;
+  if (!b.Channel || !COMMS_CHANNELS.includes(b.Channel)) {
+    return res.status(400).json({ error: 'A valid communication channel is required.' });
+  }
+  if (!b.Release_Date || !/^\d{4}-\d{2}-\d{2}$/.test(b.Release_Date) || isNaN(new Date(b.Release_Date).getTime())) {
+    return res.status(400).json({ error: 'A valid release date (YYYY-MM-DD) is required.' });
+  }
+  if (!b.Release_Time) {
+    return res.status(400).json({ error: 'A release time slot is required.' });
+  }
+  if (!isBlock && (!b.Campaign_Name?.trim() || !b.Subject_Line?.trim())) {
+    return res.status(400).json({ error: 'Campaign name and subject line are required.' });
+  }
+  if (b.Audience && !AUDIENCES.includes(b.Audience)) {
+    return res.status(400).json({ error: 'Invalid audience.' });
+  }
+
+  const conflict = slotConflict(b.Release_Date, b.Release_Time, b.Channel);
+  if (conflict) return res.status(409).json({ error: conflict });
+
+  const comm: Communication = {
+    Comm_ID: newId('c'),
+    Channel: b.Channel,
+    Release_Date: b.Release_Date,
+    Release_Time: b.Release_Time,
+    Department: b.Department?.trim() || '',
+    Campaign_Name: isBlock ? (b.Campaign_Name?.trim() || '(Blocked)') : b.Campaign_Name!.trim(),
+    Subject_Line: b.Subject_Line?.trim() || '',
+    Comms_SPOC: b.Comms_SPOC?.trim() || user.Name,
+    Business_SPOC: b.Business_SPOC?.trim() || '',
+    Audience: (b.Audience as Communication['Audience']) || 'All Employees',
+    Languages: Array.isArray(b.Languages) && b.Languages.length ? b.Languages : ['English'],
+    Sub_Type: b.Sub_Type,
+    Category: b.Category,
+    Blocked: isBlock || undefined,
+    CTA_Text: b.CTA_Text?.trim() || undefined,
+    CTA_Link: b.CTA_Link?.trim() || undefined,
+    Sender_ID: b.Sender_ID?.trim() || undefined,
+    Creative_Link: b.Creative_Link?.trim() || undefined,
+    Status: 'Booked',
+    Created_At: new Date().toISOString(),
+    Notes: b.Notes?.trim() || undefined
+  };
+  db.communications.push(comm);
+
+  pushLog({
+    id: newId('l'),
+    timestamp: new Date().toISOString(),
+    type: 'system_template',
+    message: `📅 Slot booked: ${comm.Channel} on ${comm.Release_Date} at ${comm.Release_Time} — "${comm.Campaign_Name}" (${comm.Department || 'no dept'}).`,
+    meta: { taskTitle: comm.Campaign_Name }
+  });
+
+  persist();
+  res.status(201).json({ communication: comm });
+});
+
+// Edit a booking (IC only). Re-checks slot clash when date/time/channel change.
+app.patch('/api/communications/:id', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Internal') {
+    return res.status(403).json({ error: 'Only the IC team can edit bookings.' });
+  }
+  const comm = db.communications.find(c => c.Comm_ID === req.params.id);
+  if (!comm) return res.status(404).json({ error: 'Booking not found.' });
+
+  const b = (req.body ?? {}) as Partial<Communication>;
+  const nextDate = b.Release_Date ?? comm.Release_Date;
+  const nextTime = b.Release_Time ?? comm.Release_Time;
+  const nextChannel = b.Channel ?? comm.Channel;
+
+  if (b.Release_Date && (!/^\d{4}-\d{2}-\d{2}$/.test(b.Release_Date) || isNaN(new Date(b.Release_Date).getTime()))) {
+    return res.status(400).json({ error: 'A valid release date (YYYY-MM-DD) is required.' });
+  }
+  if (b.Channel && !COMMS_CHANNELS.includes(b.Channel)) {
+    return res.status(400).json({ error: 'Invalid channel.' });
+  }
+  if (nextDate !== comm.Release_Date || nextTime !== comm.Release_Time || nextChannel !== comm.Channel) {
+    const conflict = slotConflict(nextDate, nextTime, nextChannel, comm.Comm_ID);
+    if (conflict) return res.status(409).json({ error: conflict });
+  }
+
+  const editable: (keyof Communication)[] = [
+    'Channel', 'Release_Date', 'Release_Time', 'Department', 'Campaign_Name', 'Subject_Line',
+    'Comms_SPOC', 'Business_SPOC', 'Audience', 'Languages', 'Sub_Type', 'Category', 'CTA_Text', 'CTA_Link',
+    'Sender_ID', 'Creative_Link', 'Notes'
+  ];
+  for (const k of editable) {
+    if (b[k] !== undefined) (comm as any)[k] = typeof b[k] === 'string' ? (b[k] as string).trim() : b[k];
+  }
+
+  pushLog({
+    id: newId('l'),
+    timestamp: new Date().toISOString(),
+    type: 'system_template',
+    message: `✏️ Booking updated: "${comm.Campaign_Name}" (${comm.Channel}, ${comm.Release_Date} ${comm.Release_Time}).`,
+    meta: { taskTitle: comm.Campaign_Name }
+  });
+
+  persist();
+  res.json({ communication: comm });
+});
+
+// Cancel a booking (IC only). Soft — stays in history.
+app.delete('/api/communications/:id', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Internal') {
+    return res.status(403).json({ error: 'Only the IC team can cancel bookings.' });
+  }
+  const comm = db.communications.find(c => c.Comm_ID === req.params.id);
+  if (!comm) return res.status(404).json({ error: 'Booking not found.' });
+  comm.Status = 'Cancelled';
+  pushLog({
+    id: newId('l'),
+    timestamp: new Date().toISOString(),
+    type: 'system_template',
+    message: `🗑️ Booking cancelled: "${comm.Campaign_Name}" (${comm.Channel}, ${comm.Release_Date}).`,
+    meta: { taskTitle: comm.Campaign_Name }
+  });
+  persist();
+  res.json({ communication: comm });
+});
+
+// Spin off a linked vendor creative task for a booking (IC only).
+app.post('/api/communications/:id/create-task', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Internal') {
+    return res.status(403).json({ error: 'Only the IC team can create design tasks.' });
+  }
+  const comm = db.communications.find(c => c.Comm_ID === req.params.id);
+  if (!comm) return res.status(404).json({ error: 'Booking not found.' });
+  if (comm.Linked_Task_ID && db.tasks.some(t => t.Task_ID === comm.Linked_Task_ID)) {
+    return res.status(400).json({ error: 'This booking already has a design task.' });
+  }
+
+  const { Assigned_Vendor_ID } = (req.body ?? {}) as { Assigned_Vendor_ID?: string };
+  const vendorId = Assigned_Vendor_ID || INHOUSE_VENDOR_ID;
+  const vendor = db.vendors.find(v => v.Vendor_ID === vendorId);
+  if (!vendor) return res.status(400).json({ error: 'Specified vendor does not exist.' });
+
+  const assetType: AssetType = CHANNEL_ASSET_TYPE[comm.Channel] || 'Emailer';
+  const template = ASSET_TEMPLATES[assetType];
+  const task: Task = {
+    Task_ID: newId('t'),
+    Title: comm.Campaign_Name,
+    Asset_Type: assetType,
+    Assigned_Vendor_ID: vendorId,
+    Due_Date: comm.Release_Date,
+    Status: 'Assigned',
+    Dimensions: template.dimensions,
+    BrandGuidelines: template.brandGuidelines,
+    Requirements: template.requirements,
+    Created_At: new Date().toISOString(),
+    Comments: []
+  };
+  db.tasks.push(task);
+  comm.Linked_Task_ID = task.Task_ID;
+  comm.Status = 'In Design';
+
+  pushLog({
+    id: newId('l'),
+    timestamp: new Date().toISOString(),
+    type: 'system_template',
+    message: `🎨 Design task created for "${comm.Campaign_Name}" → ${vendor.Company_Name} (${assetType}).`,
+    meta: { taskId: task.Task_ID, taskTitle: task.Title, vendorId: vendor.Vendor_ID, vendorName: vendor.Company_Name }
+  });
+  pushLiveEvent({
+    title: '📋 New Brief Assigned!',
+    message: `A new brief "${task.Title}" (${assetType}) has been assigned. Due ${task.Due_Date}.`,
+    taskId: task.Task_ID,
+    vendorId: vendor.Vendor_ID,
+    vendorName: vendor.Company_Name
+  });
+
+  persist();
+  res.status(201).json({ communication: comm, task });
+});
+
+// Mark a booking Ready (creative approved / none needed) — IC only.
+app.post('/api/communications/:id/ready', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Internal') {
+    return res.status(403).json({ error: 'Only the IC team can update bookings.' });
+  }
+  const comm = db.communications.find(c => c.Comm_ID === req.params.id);
+  if (!comm) return res.status(404).json({ error: 'Booking not found.' });
+  const { Creative_Link } = (req.body ?? {}) as { Creative_Link?: string };
+  if (Creative_Link?.trim()) comm.Creative_Link = Creative_Link.trim();
+  comm.Status = 'Ready';
+  persist();
+  res.json({ communication: comm });
+});
+
+// Hand off to the release SPOC (IC only) — the auto-filled Release Request Form.
+app.post('/api/communications/:id/handoff', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Internal') {
+    return res.status(403).json({ error: 'Only the IC team can hand off releases.' });
+  }
+  const comm = db.communications.find(c => c.Comm_ID === req.params.id);
+  if (!comm) return res.status(404).json({ error: 'Booking not found.' });
+
+  const b = (req.body ?? {}) as Partial<Communication>;
+  // Allow filling the release-form fields at handoff time
+  for (const k of ['CTA_Text', 'CTA_Link', 'Sender_ID', 'Creative_Link', 'Notes'] as const) {
+    if (typeof b[k] === 'string' && b[k]!.trim()) (comm as any)[k] = b[k]!.trim();
+  }
+  comm.Status = 'Handed Off';
+  comm.Handed_Off_At = new Date().toISOString();
+
+  const spoc = db.users.find(u => u.Role === 'Release');
+  pushLog({
+    id: newId('l'),
+    timestamp: new Date().toISOString(),
+    type: 'system_template',
+    message: `📤 Release handed off to ${spoc?.Name || 'release SPOC'}: "${comm.Campaign_Name}" (${comm.Channel}, ${comm.Release_Date} ${comm.Release_Time}).`,
+    meta: { taskTitle: comm.Campaign_Name }
+  });
+  pushLiveEvent({
+    title: '📤 Ready to Release',
+    message: `"${comm.Campaign_Name}" (${comm.Channel}) is ready to go live on ${comm.Release_Date} at ${comm.Release_Time}.`,
+    taskId: comm.Comm_ID,
+    vendorId: '',
+    vendorName: 'Release Desk'
+  });
+
+  persist();
+  res.json({ communication: comm });
+});
+
+// Mark released (Release SPOC only).
+app.post('/api/communications/:id/release', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Release') {
+    return res.status(403).json({ error: 'Only the release SPOC can mark a communication as released.' });
+  }
+  const comm = db.communications.find(c => c.Comm_ID === req.params.id);
+  if (!comm) return res.status(404).json({ error: 'Booking not found.' });
+  if (comm.Status !== 'Handed Off') {
+    return res.status(400).json({ error: 'Only handed-off communications can be released.' });
+  }
+  comm.Status = 'Released';
+  comm.Released_At = new Date().toISOString();
+  comm.Released_By = user.Name;
+
+  pushLog({
+    id: newId('l'),
+    timestamp: new Date().toISOString(),
+    type: 'system_template',
+    message: `✅ Released: "${comm.Campaign_Name}" (${comm.Channel}) went live — released by ${user.Name}.`,
+    meta: { taskTitle: comm.Campaign_Name }
+  });
+  pushLiveEvent({
+    title: '✅ Communication Released',
+    message: `"${comm.Campaign_Name}" (${comm.Channel}) is now live.`,
+    taskId: comm.Comm_ID,
+    vendorId: '',
+    vendorName: user.Name
+  });
+
+  persist();
+  res.json({ communication: comm });
+});
+
+// -------------------------------------------------------------
+// WEEKLY PLACEMENTS (Wallpaper / Lockscreen / banners) — IC only
+// -------------------------------------------------------------
+app.post('/api/placements', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Internal') return res.status(403).json({ error: 'Only the IC team can plan placements.' });
+  const b = (req.body ?? {}) as Partial<WeeklyPlacement>;
+  if (!b.Surface || !PLACEMENT_SURFACES.includes(b.Surface)) return res.status(400).json({ error: 'A valid placement surface is required.' });
+  if (!b.Start_Date || !/^\d{4}-\d{2}-\d{2}$/.test(b.Start_Date)) return res.status(400).json({ error: 'A valid start date is required.' });
+  if (!b.End_Date || !/^\d{4}-\d{2}-\d{2}$/.test(b.End_Date)) return res.status(400).json({ error: 'A valid end date is required.' });
+  if (b.End_Date < b.Start_Date) return res.status(400).json({ error: 'End date must be on or after the start date.' });
+
+  // One placement per surface per overlapping week
+  const overlap = db.placements.find(p => p.Surface === b.Surface && !(b.End_Date! < p.Start_Date || b.Start_Date! > p.End_Date));
+  if (overlap) return res.status(409).json({ error: `${b.Surface} is already booked ${overlap.Start_Date}–${overlap.End_Date} ("${overlap.Campaign_Theme || 'Blocked'}").` });
+
+  const placement: WeeklyPlacement = {
+    Placement_ID: newId('p'),
+    Surface: b.Surface,
+    Start_Date: b.Start_Date,
+    End_Date: b.End_Date,
+    Business_Unit: b.Business_Unit?.trim() || '',
+    Campaign_Theme: b.Campaign_Theme?.trim() || '',
+    Comms_SPOC: b.Comms_SPOC?.trim() || user.Name,
+    Business_SPOC: b.Business_SPOC?.trim() || '',
+    Audience: b.Audience?.trim() || 'All Employees',
+    Status: (b.Status as WeeklyPlacement['Status']) || 'Planned',
+    Comments: b.Comments?.trim() || undefined,
+    Created_At: new Date().toISOString()
+  };
+  db.placements.push(placement);
+  pushLog({
+    id: newId('l'), timestamp: new Date().toISOString(), type: 'system_template',
+    message: `🖼️ ${placement.Surface} booked ${placement.Start_Date}–${placement.End_Date}: "${placement.Campaign_Theme || 'Blocked'}".`,
+    meta: { taskTitle: placement.Campaign_Theme }
+  });
+  persist();
+  res.status(201).json({ placement });
+});
+
+app.patch('/api/placements/:id', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Internal') return res.status(403).json({ error: 'Only the IC team can edit placements.' });
+  const p = db.placements.find(x => x.Placement_ID === req.params.id);
+  if (!p) return res.status(404).json({ error: 'Placement not found.' });
+  const b = (req.body ?? {}) as Partial<WeeklyPlacement>;
+  for (const k of ['Business_Unit', 'Campaign_Theme', 'Comms_SPOC', 'Business_SPOC', 'Audience', 'Status', 'Comments'] as const) {
+    if (typeof b[k] === 'string') (p as any)[k] = (b[k] as string).trim();
+  }
+  persist();
+  res.json({ placement: p });
+});
+
+app.delete('/api/placements/:id', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Internal') return res.status(403).json({ error: 'Only the IC team can remove placements.' });
+  const idx = db.placements.findIndex(x => x.Placement_ID === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Placement not found.' });
+  const [removed] = db.placements.splice(idx, 1);
+  persist();
+  res.json({ removed: removed.Placement_ID });
+});
+
+// -------------------------------------------------------------
+// WEBINARS — IC only
+// -------------------------------------------------------------
+app.post('/api/webinars', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Internal') return res.status(403).json({ error: 'Only the IC team can schedule webinars.' });
+  const b = (req.body ?? {}) as Partial<Webinar>;
+  if (!b.Date || !/^\d{4}-\d{2}-\d{2}$/.test(b.Date)) return res.status(400).json({ error: 'A valid date is required.' });
+  if (!b.Topic?.trim()) return res.status(400).json({ error: 'A webinar topic is required.' });
+  const webinar: Webinar = {
+    Webinar_ID: newId('w'),
+    Date: b.Date,
+    Start_Time: b.Start_Time?.trim() || '15:00',
+    End_Time: b.End_Time?.trim() || '16:00',
+    Department: b.Department?.trim() || '',
+    Topic: b.Topic.trim(),
+    Host: b.Host?.trim() || '',
+    Comms_SPOC: b.Comms_SPOC?.trim() || user.Name,
+    Audience: b.Audience?.trim() || 'All Employees',
+    Views: typeof b.Views === 'number' ? b.Views : undefined,
+    Created_At: new Date().toISOString()
+  };
+  db.webinars.push(webinar);
+  pushLog({
+    id: newId('l'), timestamp: new Date().toISOString(), type: 'system_template',
+    message: `🎥 Webinar scheduled: "${webinar.Topic}" on ${webinar.Date} at ${webinar.Start_Time}.`,
+    meta: { taskTitle: webinar.Topic }
+  });
+  persist();
+  res.status(201).json({ webinar });
+});
+
+app.delete('/api/webinars/:id', getSecurityContext, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Internal') return res.status(403).json({ error: 'Only the IC team can remove webinars.' });
+  const idx = db.webinars.findIndex(x => x.Webinar_ID === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Webinar not found.' });
+  const [removed] = db.webinars.splice(idx, 1);
+  persist();
+  res.json({ removed: removed.Webinar_ID });
+});
+
 // Submit Deliverable (Upload simulating version control)
 app.post('/api/deliverables', getSecurityContext, (req, res) => {
   const user = (req as AuthedRequest).user;
@@ -869,6 +1287,14 @@ app.post('/api/deliverables/:id/review', getSecurityContext, (req, res) => {
   task.Status = status === 'Approved' ? 'Approved' : 'Needs Revision';
   if (status === 'Approved') {
     task.Approved_At = new Date().toISOString();
+    // Advance any calendar booking waiting on this creative to "Ready"
+    const linkedComm = db.communications.find(c => c.Linked_Task_ID === task.Task_ID && c.Status === 'In Design');
+    if (linkedComm) {
+      linkedComm.Status = 'Ready';
+      if (!linkedComm.Creative_Link) {
+        linkedComm.Creative_Link = deliverable.File_URL;
+      }
+    }
   }
 
   if (comment && comment.trim()) {

@@ -61,6 +61,14 @@ export const DEFAULT_DB: DatabaseState = {
       Role: 'Vendor',
       Vendor_ID: 'v-modal',
       Avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=120&auto=format&fit=crop&q=80'
+    },
+    {
+      User_ID: 'u-release-spoc',
+      Name: 'Ravi Menon',
+      Email: 'ravi.release@company.com',
+      Role: 'Release',
+      Vendor_ID: null,
+      Avatar: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=120&auto=format&fit=crop&q=80'
     }
   ],
   tasks: [
@@ -141,6 +149,85 @@ export const DEFAULT_DB: DatabaseState = {
       Uploaded_At: '2026-07-02T10:15:00.000Z',
       Approval_Status: 'Pending',
       Feedback_History: []
+    }
+  ],
+  communications: [
+    {
+      Comm_ID: 'c-1',
+      Channel: 'Mail',
+      Release_Date: '2026-07-06',
+      Release_Time: '12:00',
+      Department: 'L&D',
+      Campaign_Name: 'FLP - Part II',
+      Subject_Line: 'FLP - Part II: Your next learning milestone',
+      Comms_SPOC: 'Niharika Srivastava',
+      Business_SPOC: 'Sneha Sharma',
+      Audience: 'All Employees',
+      Languages: ['English'],
+      Sub_Type: 'Mailer',
+      Category: 'Important',
+      Sender_ID: 'Learning@company',
+      Linked_Task_ID: 't-1',
+      Status: 'In Design',
+      Created_At: '2026-07-01T09:00:00.000Z'
+    },
+    {
+      Comm_ID: 'c-2',
+      Channel: 'Ticker',
+      Release_Date: '2026-07-03',
+      Release_Time: '14:00',
+      Department: 'Information Security',
+      Campaign_Name: 'Infosec Awareness',
+      Subject_Line: 'KYC Scam: stay alert',
+      Comms_SPOC: 'Naythan Vaz',
+      Business_SPOC: 'Harshad Joshi',
+      Audience: 'All Employees',
+      Languages: ['English'],
+      Category: 'Critical',
+      Status: 'Ready',
+      Created_At: '2026-06-30T10:00:00.000Z'
+    }
+  ],
+  placements: [
+    {
+      Placement_ID: 'p-1',
+      Surface: 'Wallpaper',
+      Start_Date: '2026-07-06',
+      End_Date: '2026-07-12',
+      Business_Unit: 'IT',
+      Campaign_Theme: 'New Password Policy',
+      Comms_SPOC: 'Naythan Vaz',
+      Business_SPOC: 'Prasad Mali',
+      Audience: 'All Employees',
+      Status: 'Live',
+      Created_At: '2026-07-01T08:00:00.000Z'
+    },
+    {
+      Placement_ID: 'p-2',
+      Surface: 'Lockscreen',
+      Start_Date: '2026-07-06',
+      End_Date: '2026-07-12',
+      Business_Unit: 'C&B',
+      Campaign_Theme: "Goal Setting FY'27",
+      Comms_SPOC: 'Tushangi Rastogi',
+      Business_SPOC: 'Rashi Pathade',
+      Audience: 'All Employees',
+      Status: 'Planned',
+      Created_At: '2026-07-01T08:05:00.000Z'
+    }
+  ],
+  webinars: [
+    {
+      Webinar_ID: 'w-1',
+      Date: '2026-07-10',
+      Start_Time: '15:00',
+      End_Time: '16:00',
+      Department: 'L&D',
+      Topic: 'NMIMS Executive MBA Webinar',
+      Host: 'NMIMS',
+      Comms_SPOC: 'Monika Mishra',
+      Audience: 'All Employees',
+      Created_At: '2026-06-25T10:00:00.000Z'
     }
   ],
   logs: [

@@ -4,6 +4,16 @@ A collaborative creative-asset pipeline for managing external vendor agencies: i
 
 **▶ Live demo:** https://iamahipal.github.io/Vendor-Management/ — an interactive static build deployed automatically to GitHub Pages on every push to `main`. The entire API runs in your browser (data persists in localStorage; use "Reset Demo Data" to start over). AI critiques are offline in the demo since a public page cannot hold API keys — run locally to enable them.
 
+## The pipeline
+
+One tool covers the whole internal-communications flow:
+
+1. **Book the slot** — the IC team books every communication into a fixed daily calendar slot (date · time · channel), before anything else. No double-booking a channel in a slot.
+2. **Brief the vendor** — a booked slot that needs a creative spins off a linked design task (existing vendor management); the approved creative flows back onto the slot.
+3. **Hand off to release** — once ready, the IC team hands off the auto-filled Release Request Form to the **release SPOC**, who executes in Factorial and marks it Released.
+
+Roles: **IC team** (Internal) books & briefs · **Vendor** designs · **Release SPOC** (Release) pushes live. Requesting teams stay on email; the IC team logs their request when booking.
+
 ## Features
 
 - **Internal dashboard** — Kanban board of creative briefs across five statuses, quick stats, filters by asset type and vendor, and a review modal for approving/rejecting deliverables with threaded feedback.
