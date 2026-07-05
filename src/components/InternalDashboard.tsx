@@ -222,7 +222,7 @@ export default function InternalDashboard({
     <div id="internal-dashboard" className="space-y-6 animate-fade-in">
 
       {/* Board / Vendors view toggle */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={() => setView('board')}
           className={`py-2 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all cursor-pointer ${
@@ -467,7 +467,7 @@ export default function InternalDashboard({
                                 {urgency.label}
                               </span>
                             ) : (
-                              <div className="flex items-center gap-1 text-[11px] text-slate-500 font-mono">
+                              <div className="flex items-center gap-1 text-[11px] text-slate-500 font-mono whitespace-nowrap shrink-0">
                                 <Clock className="h-3 w-3 shrink-0 text-slate-400" />
                                 <span>{task.Due_Date.substring(5)}</span>
                               </div>
@@ -476,19 +476,19 @@ export default function InternalDashboard({
 
                           {/* Latest Deliverable Version badge */}
                           {taskDels.length > 0 && (
-                            <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-[10px] font-mono">
-                              <span className="text-slate-600 flex items-center gap-1 truncate max-w-[140px]">
+                            <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between gap-2 text-[10px] font-mono">
+                              <span className="text-slate-600 flex items-center gap-1 flex-1 min-w-0">
                                 <FileCode className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                                {latestDel.File_Name}
+                                <span className="truncate">{latestDel.File_Name}</span>
                               </span>
 
                               {task.Status === 'Delivered' ? (
-                                <span className="text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded text-[9px] uppercase font-bold tracking-wide animate-pulse">
+                                <span className="text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded text-[9px] uppercase font-bold tracking-wide animate-pulse whitespace-nowrap shrink-0">
                                   Review now
                                 </span>
                               ) : (
-                                <span className="text-slate-500">
-                                  v{latestDel.Version} {latestDel.Approval_Status}
+                                <span className="text-slate-500 whitespace-nowrap shrink-0">
+                                  v{latestDel.Version} · {latestDel.Approval_Status === 'Pending' ? 'Waiting' : latestDel.Approval_Status}
                                 </span>
                               )}
                             </div>

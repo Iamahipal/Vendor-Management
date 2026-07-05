@@ -174,8 +174,8 @@ export default function VendorsPanel({ vendors, users, tasks, deliverables, onAd
 
               {contact && (
                 <div className="text-sm text-slate-600 space-y-1">
-                  <div className="flex items-center gap-1.5"><UserRound className="h-3.5 w-3.5 text-slate-400" />{contact.Name}</div>
-                  <div className="flex items-center gap-1.5 truncate"><Mail className="h-3.5 w-3.5 text-slate-400" />{contact.Email || '—'}</div>
+                  <div className="flex items-center gap-1.5 min-w-0"><UserRound className="h-3.5 w-3.5 text-slate-400 shrink-0" /><span className="truncate">{contact.Name}</span></div>
+                  <div className="flex items-center gap-1.5 min-w-0"><Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" /><span className="truncate">{contact.Email || '—'}</span></div>
                 </div>
               )}
 

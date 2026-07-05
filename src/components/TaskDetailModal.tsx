@@ -93,8 +93,8 @@ export default function TaskDetailModal({
                 </span>
               )}
             </div>
-            <h3 className="font-sans font-bold text-slate-900 text-base leading-snug">{task.Title}</h3>
-            <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
+            <h3 className="font-sans font-bold text-slate-900 text-base leading-snug break-words">{task.Title}</h3>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 mt-1">
               <span className="flex items-center gap-1"><User className="h-3.5 w-3.5" />{vendorName}</span>
               <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" />Due {task.Due_Date}</span>
               <span className="font-semibold text-slate-600">{task.Status}</span>
