@@ -8,7 +8,11 @@ import {
   Task,
   TaskStatus,
   User,
-  Vendor
+  Vendor,
+  Communication,
+  COMMS_CHANNELS,
+  CHANNEL_ASSET_TYPE,
+  INHOUSE_VENDOR_ID
 } from './types';
 
 // -------------------------------------------------------------
@@ -34,6 +38,7 @@ function loadDb(): DatabaseState {
         users: parsed.users ?? [],
         tasks: parsed.tasks ?? [],
         deliverables: parsed.deliverables ?? [],
+        communications: parsed.communications ?? [],
         logs: parsed.logs ?? []
       };
     }
@@ -43,8 +48,10 @@ function loadDb(): DatabaseState {
   return structuredClone(DEFAULT_DB);
 }
 
-// Migrate records created before task-level conversations / in-house work
+// Migrate records created before task-level conversations / in-house work /
+// the calendar & release SPOC
 function migrate(db: DatabaseState): DatabaseState {
+  db.communications ??= [];
   db.tasks.forEach(t => { t.Comments ??= []; });
   if (!db.vendors.some(v => v.Vendor_ID === 'v-inhouse')) {
     db.vendors.unshift({
@@ -53,6 +60,10 @@ function migrate(db: DatabaseState): DatabaseState {
       Specialty: 'Deployed internally via Snapcoms (wallpapers, tickers, popups)',
       Logo: ''
     });
+  }
+  if (!db.users.some(u => u.Role === 'Release')) {
+    const seedSpoc = DEFAULT_DB.users.find(u => u.Role === 'Release');
+    if (seedSpoc) db.users.push(seedSpoc);
   }
   return db;
 }
@@ -217,8 +228,14 @@ export async function demoFetch(input: string, init?: RequestInit): Promise<Resp
     } else {
       rlsLogs.push('RLS Bypass: Internal PFL Team Member. Full administrative read query granted.');
     }
+    const communications =
+      user.Role === 'Internal'
+        ? db.communications
+        : user.Role === 'Release'
+          ? db.communications.filter(c => c.Status === 'Handed Off' || c.Status === 'Released')
+          : [];
     return json(200, {
-      user, users, vendors, tasks, deliverables, logs,
+      user, users, vendors, tasks, deliverables, communications, logs,
       aiProviders: [],
       rlsSimulation: {
         applied: user.Role === 'Vendor',
@@ -492,6 +509,185 @@ export async function demoFetch(input: string, init?: RequestInit): Promise<Resp
     return json(200, { vendor, contact: contact ?? null });
   }
 
+  // ---- CALENDAR / RELEASE PIPELINE ----
+  const VALID_AUDIENCE = ['All Employees', 'Targeted'];
+  const VALID_LANGUAGE = ['English', 'Vernacular'];
+
+  // POST /api/communications — book a slot (IC only)
+  if (method === 'POST' && path === '/api/communications') {
+    if (user.Role !== 'Internal') return json(403, { error: 'Only the IC team can book calendar slots.' });
+    const c = body as Partial<Communication>;
+    if (!c.Channel || !COMMS_CHANNELS.includes(c.Channel)) return json(400, { error: 'A valid communication channel is required.' });
+    if (!c.Release_Date || !/^\d{4}-\d{2}-\d{2}$/.test(c.Release_Date) || isNaN(new Date(c.Release_Date).getTime())) return json(400, { error: 'A valid release date (YYYY-MM-DD) is required.' });
+    if (!c.Release_Time) return json(400, { error: 'A release time slot is required.' });
+    if (!c.Campaign_Name?.trim() || !c.Subject_Line?.trim()) return json(400, { error: 'Campaign name and subject line are required.' });
+    if (c.Audience && !VALID_AUDIENCE.includes(c.Audience)) return json(400, { error: 'Audience must be All Employees or Targeted.' });
+    if (c.Language && !VALID_LANGUAGE.includes(c.Language)) return json(400, { error: 'Language must be English or Vernacular.' });
+    const clash = db.communications.find(x => x.Status !== 'Cancelled' && x.Release_Date === c.Release_Date && x.Release_Time === c.Release_Time && x.Channel === c.Channel);
+    if (clash) return json(409, { error: `That slot is already taken: ${c.Channel} on ${c.Release_Date} at ${c.Release_Time} ("${clash.Campaign_Name}"). Pick another slot.` });
+    const comm: Communication = {
+      Comm_ID: newId('c'),
+      Channel: c.Channel,
+      Release_Date: c.Release_Date,
+      Release_Time: c.Release_Time,
+      Department: c.Department?.trim() || '',
+      Campaign_Name: c.Campaign_Name.trim(),
+      Subject_Line: c.Subject_Line.trim(),
+      Comms_SPOC: c.Comms_SPOC?.trim() || user.Name,
+      Business_SPOC: c.Business_SPOC?.trim() || '',
+      Audience: (c.Audience as Communication['Audience']) || 'All Employees',
+      Language: (c.Language as Communication['Language']) || 'English',
+      CTA_Text: c.CTA_Text?.trim() || undefined,
+      CTA_Link: c.CTA_Link?.trim() || undefined,
+      Sender_ID: c.Sender_ID?.trim() || undefined,
+      Creative_Link: c.Creative_Link?.trim() || undefined,
+      Status: 'Booked',
+      Created_At: new Date().toISOString(),
+      Notes: c.Notes?.trim() || undefined
+    };
+    db.communications.push(comm);
+    pushLog(db, {
+      id: newId('l'), timestamp: new Date().toISOString(), type: 'system_template',
+      message: `📅 Slot booked: ${comm.Channel} on ${comm.Release_Date} at ${comm.Release_Time} — "${comm.Campaign_Name}" (${comm.Department || 'no dept'}).`,
+      meta: { taskTitle: comm.Campaign_Name }
+    });
+    saveDb(db);
+    return json(201, { communication: comm });
+  }
+
+  const commMatch = path.match(/^\/api\/communications\/([^/]+)$/);
+  const commActionMatch = path.match(/^\/api\/communications\/([^/]+)\/(create-task|ready|handoff|release)$/);
+
+  // PATCH /api/communications/:id — edit booking (IC only)
+  if (method === 'PATCH' && commMatch) {
+    if (user.Role !== 'Internal') return json(403, { error: 'Only the IC team can edit bookings.' });
+    const comm = db.communications.find(x => x.Comm_ID === commMatch[1]);
+    if (!comm) return json(404, { error: 'Booking not found.' });
+    const c = body as Partial<Communication>;
+    const nextDate = c.Release_Date ?? comm.Release_Date;
+    const nextTime = c.Release_Time ?? comm.Release_Time;
+    const nextChannel = c.Channel ?? comm.Channel;
+    if (c.Release_Date && (!/^\d{4}-\d{2}-\d{2}$/.test(c.Release_Date) || isNaN(new Date(c.Release_Date).getTime()))) return json(400, { error: 'A valid release date (YYYY-MM-DD) is required.' });
+    if (c.Channel && !COMMS_CHANNELS.includes(c.Channel)) return json(400, { error: 'Invalid channel.' });
+    if (nextDate !== comm.Release_Date || nextTime !== comm.Release_Time || nextChannel !== comm.Channel) {
+      const clash = db.communications.find(x => x.Comm_ID !== comm.Comm_ID && x.Status !== 'Cancelled' && x.Release_Date === nextDate && x.Release_Time === nextTime && x.Channel === nextChannel);
+      if (clash) return json(409, { error: `That slot is already taken by "${clash.Campaign_Name}".` });
+    }
+    const editable: (keyof Communication)[] = ['Channel', 'Release_Date', 'Release_Time', 'Department', 'Campaign_Name', 'Subject_Line', 'Comms_SPOC', 'Business_SPOC', 'Audience', 'Language', 'CTA_Text', 'CTA_Link', 'Sender_ID', 'Creative_Link', 'Notes'];
+    for (const k of editable) {
+      if ((c as any)[k] !== undefined) (comm as any)[k] = typeof (c as any)[k] === 'string' ? (c as any)[k].trim() : (c as any)[k];
+    }
+    pushLog(db, {
+      id: newId('l'), timestamp: new Date().toISOString(), type: 'system_template',
+      message: `✏️ Booking updated: "${comm.Campaign_Name}" (${comm.Channel}, ${comm.Release_Date} ${comm.Release_Time}).`,
+      meta: { taskTitle: comm.Campaign_Name }
+    });
+    saveDb(db);
+    return json(200, { communication: comm });
+  }
+
+  // DELETE /api/communications/:id — cancel (IC only)
+  if (method === 'DELETE' && commMatch) {
+    if (user.Role !== 'Internal') return json(403, { error: 'Only the IC team can cancel bookings.' });
+    const comm = db.communications.find(x => x.Comm_ID === commMatch[1]);
+    if (!comm) return json(404, { error: 'Booking not found.' });
+    comm.Status = 'Cancelled';
+    pushLog(db, {
+      id: newId('l'), timestamp: new Date().toISOString(), type: 'system_template',
+      message: `🗑️ Booking cancelled: "${comm.Campaign_Name}" (${comm.Channel}, ${comm.Release_Date}).`,
+      meta: { taskTitle: comm.Campaign_Name }
+    });
+    saveDb(db);
+    return json(200, { communication: comm });
+  }
+
+  if (method === 'POST' && commActionMatch) {
+    const comm = db.communications.find(x => x.Comm_ID === commActionMatch[1]);
+    const action = commActionMatch[2];
+    if (!comm) return json(404, { error: 'Booking not found.' });
+
+    if (action === 'create-task') {
+      if (user.Role !== 'Internal') return json(403, { error: 'Only the IC team can create design tasks.' });
+      if (comm.Linked_Task_ID && db.tasks.some(t => t.Task_ID === comm.Linked_Task_ID)) return json(400, { error: 'This booking already has a design task.' });
+      const vendorId = (body.Assigned_Vendor_ID as string) || INHOUSE_VENDOR_ID;
+      const vendor = db.vendors.find(v => v.Vendor_ID === vendorId);
+      if (!vendor) return json(400, { error: 'Specified vendor does not exist.' });
+      const assetType: AssetType = CHANNEL_ASSET_TYPE[comm.Channel] || 'Emailer';
+      const template = ASSET_TEMPLATES[assetType];
+      const task: Task = {
+        Task_ID: newId('t'), Title: comm.Campaign_Name, Asset_Type: assetType,
+        Assigned_Vendor_ID: vendorId, Due_Date: comm.Release_Date, Status: 'Assigned',
+        Dimensions: template.dimensions, BrandGuidelines: template.brandGuidelines,
+        Requirements: template.requirements, Created_At: new Date().toISOString(), Comments: []
+      };
+      db.tasks.push(task);
+      comm.Linked_Task_ID = task.Task_ID;
+      comm.Status = 'In Design';
+      pushLog(db, {
+        id: newId('l'), timestamp: new Date().toISOString(), type: 'system_template',
+        message: `🎨 Design task created for "${comm.Campaign_Name}" → ${vendor.Company_Name} (${assetType}).`,
+        meta: { taskId: task.Task_ID, taskTitle: task.Title, vendorId: vendor.Vendor_ID, vendorName: vendor.Company_Name }
+      });
+      pushLiveEvent({
+        title: '📋 New Brief Assigned!',
+        message: `A new brief "${task.Title}" (${assetType}) has been assigned. Due ${task.Due_Date}.`,
+        taskId: task.Task_ID, vendorId: vendor.Vendor_ID, vendorName: vendor.Company_Name
+      });
+      saveDb(db);
+      return json(201, { communication: comm, task });
+    }
+
+    if (action === 'ready') {
+      if (user.Role !== 'Internal') return json(403, { error: 'Only the IC team can update bookings.' });
+      if (body.Creative_Link?.trim()) comm.Creative_Link = body.Creative_Link.trim();
+      comm.Status = 'Ready';
+      saveDb(db);
+      return json(200, { communication: comm });
+    }
+
+    if (action === 'handoff') {
+      if (user.Role !== 'Internal') return json(403, { error: 'Only the IC team can hand off releases.' });
+      for (const k of ['CTA_Text', 'CTA_Link', 'Sender_ID', 'Creative_Link', 'Notes'] as const) {
+        if (typeof body[k] === 'string' && body[k].trim()) (comm as any)[k] = body[k].trim();
+      }
+      comm.Status = 'Handed Off';
+      comm.Handed_Off_At = new Date().toISOString();
+      const spoc = db.users.find(u => u.Role === 'Release');
+      pushLog(db, {
+        id: newId('l'), timestamp: new Date().toISOString(), type: 'system_template',
+        message: `📤 Release handed off to ${spoc?.Name || 'release SPOC'}: "${comm.Campaign_Name}" (${comm.Channel}, ${comm.Release_Date} ${comm.Release_Time}).`,
+        meta: { taskTitle: comm.Campaign_Name }
+      });
+      pushLiveEvent({
+        title: '📤 Ready to Release',
+        message: `"${comm.Campaign_Name}" (${comm.Channel}) is ready to go live on ${comm.Release_Date} at ${comm.Release_Time}.`,
+        taskId: comm.Comm_ID, vendorId: '', vendorName: 'Release Desk'
+      });
+      saveDb(db);
+      return json(200, { communication: comm });
+    }
+
+    if (action === 'release') {
+      if (user.Role !== 'Release') return json(403, { error: 'Only the release SPOC can mark a communication as released.' });
+      if (comm.Status !== 'Handed Off') return json(400, { error: 'Only handed-off communications can be released.' });
+      comm.Status = 'Released';
+      comm.Released_At = new Date().toISOString();
+      comm.Released_By = user.Name;
+      pushLog(db, {
+        id: newId('l'), timestamp: new Date().toISOString(), type: 'system_template',
+        message: `✅ Released: "${comm.Campaign_Name}" (${comm.Channel}) went live — released by ${user.Name}.`,
+        meta: { taskTitle: comm.Campaign_Name }
+      });
+      pushLiveEvent({
+        title: '✅ Communication Released',
+        message: `"${comm.Campaign_Name}" (${comm.Channel}) is now live.`,
+        taskId: comm.Comm_ID, vendorId: '', vendorName: user.Name
+      });
+      saveDb(db);
+      return json(200, { communication: comm });
+    }
+  }
+
   // POST /api/deliverables
   if (method === 'POST' && path === '/api/deliverables') {
     const { Task_ID, File_URL, File_Name } = body;
@@ -550,6 +746,11 @@ export async function demoFetch(input: string, init?: RequestInit): Promise<Resp
     task.Status = status === 'Approved' ? 'Approved' : 'Needs Revision';
     if (status === 'Approved') {
       task.Approved_At = new Date().toISOString();
+      const linkedComm = db.communications.find(c => c.Linked_Task_ID === task.Task_ID && c.Status === 'In Design');
+      if (linkedComm) {
+        linkedComm.Status = 'Ready';
+        if (!linkedComm.Creative_Link) linkedComm.Creative_Link = deliverable.File_URL;
+      }
     }
     if (comment && comment.trim()) {
       deliverable.Feedback_History.push({

@@ -3,6 +3,7 @@ import { DatabaseState, User, TaskStatus, AssetType } from './types';
 import { DEMO_MODE, demoFetch, resetDemoDb } from './demoApi';
 import InternalDashboard from './components/InternalDashboard';
 import VendorPortal from './components/VendorPortal';
+import ReleaseDesk from './components/ReleaseDesk';
 import HelpGuide from './components/HelpGuide';
 import ActivityFeed from './components/ActivityFeed';
 import {
@@ -34,6 +35,7 @@ export default function App() {
     vendors: [],
     tasks: [],
     deliverables: [],
+    communications: [],
     logs: []
   });
 
@@ -328,6 +330,43 @@ export default function App() {
     }
   };
 
+  // Calendar / release pipeline actions (return the updated communication or null)
+  const commAction = async (path: string, method: string, body?: unknown, failMsg = 'Action failed.'): Promise<any | null> => {
+    try {
+      const res = await apiFetch(path, {
+        method,
+        headers: { 'Content-Type': 'application/json', 'x-simulated-user-id': selectedUserId },
+        body: body === undefined ? undefined : JSON.stringify(body)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        await fetchDb();
+        return data;
+      }
+      pushErrorAlert(data.error || failMsg);
+      return null;
+    } catch (e) {
+      console.error(e);
+      pushErrorAlert('Network error: ' + failMsg);
+      return null;
+    }
+  };
+
+  const handleBookSlot = (fields: Record<string, unknown>) =>
+    commAction('/api/communications', 'POST', fields, 'could not book the slot.').then(d => !!d);
+  const handleEditBooking = (id: string, fields: Record<string, unknown>) =>
+    commAction(`/api/communications/${id}`, 'PATCH', fields, 'could not save the booking.').then(d => !!d);
+  const handleCancelBooking = (id: string) =>
+    commAction(`/api/communications/${id}`, 'DELETE', undefined, 'could not cancel the booking.').then(d => !!d);
+  const handleCreateDesignTask = (id: string, vendorId: string) =>
+    commAction(`/api/communications/${id}/create-task`, 'POST', { Assigned_Vendor_ID: vendorId }, 'could not create the design task.').then(d => !!d);
+  const handleMarkReady = (id: string, creativeLink?: string) =>
+    commAction(`/api/communications/${id}/ready`, 'POST', { Creative_Link: creativeLink }, 'could not mark ready.').then(d => !!d);
+  const handleHandoff = (id: string, fields: Record<string, unknown>) =>
+    commAction(`/api/communications/${id}/handoff`, 'POST', fields, 'could not hand off the release.').then(d => !!d);
+  const handleRelease = (id: string) =>
+    commAction(`/api/communications/${id}/release`, 'POST', undefined, 'could not mark released.').then(d => !!d);
+
   // API Call: Post back-and-forth feedback comment on a deliverable
   const handlePostFeedback = async (deliverableId: string, comment: string) => {
     try {
@@ -464,7 +503,7 @@ export default function App() {
                     referrerPolicy="no-referrer"
                     className="h-4 w-4 rounded-full object-cover border border-slate-300 shrink-0"
                   />
-                  <span className="truncate max-w-[85px]">{u.Name.split(' ')[0]} ({u.Role === 'Internal' ? 'PFL' : 'Vendor'})</span>
+                  <span className="truncate max-w-[95px]">{u.Name.split(' ')[0]} ({u.Role === 'Internal' ? 'IC Team' : u.Role === 'Release' ? 'Release' : 'Vendor'})</span>
                 </button>
               );
             })}
@@ -494,11 +533,11 @@ export default function App() {
         )}
 
         {/* Friendly greeting instead of security jargon banners */}
-        {currentUser && (
+        {currentUser && currentUser.Role !== 'Release' && (
           <p className="text-sm text-slate-500">
             {currentUser.Role === 'Vendor'
               ? `Hi ${currentUser.Name.split(' ')[0]} — here are the requests for ${dbState.vendors[0]?.Company_Name || 'your team'}.`
-              : `Hi ${currentUser.Name.split(' ')[0]} — here's where all your design requests stand.`}
+              : `Hi ${currentUser.Name.split(' ')[0]} — the calendar, vendor work and releases, all in one place.`}
           </p>
         )}
 
@@ -523,7 +562,15 @@ export default function App() {
                 onAddVendor={handleAddVendor}
                 onEditVendor={handleEditVendor}
                 onOrganizeBrief={handleOrganizeBrief}
+                onBookSlot={handleBookSlot}
+                onEditBooking={handleEditBooking}
+                onCancelBooking={handleCancelBooking}
+                onCreateDesignTask={handleCreateDesignTask}
+                onMarkReady={handleMarkReady}
+                onHandoff={handleHandoff}
               />
+            ) : currentUser?.Role === 'Release' ? (
+              <ReleaseDesk dbState={dbState} onRelease={handleRelease} />
             ) : (
               <VendorPortal
                 dbState={dbState}
@@ -534,7 +581,7 @@ export default function App() {
                 onPostTaskComment={handlePostTaskComment}
               />
             )}
-            
+
             {/* Plain-language recent activity for the internal team */}
             {currentUser?.Role === 'Internal' && (
               <ActivityFeed logs={dbState.logs || []} />

@@ -8,7 +8,8 @@ import {
   daysFromNow,
   ADMIN,
   PIXEL_VENDOR,
-  PRESS_VENDOR
+  PRESS_VENDOR,
+  RELEASE_SPOC
 } from './helpers';
 
 // Black-box tests against the real HTTP server: each suite boots its own
@@ -500,5 +501,99 @@ describe('history & metrics foundations', () => {
     // with no AI keys configured the organizer reports 502, never a crash
     const noAi = await s.api(ADMIN, 'POST', '/api/ai/organize-brief', { rawText: 'We need a Diwali emailer for all employees by 2099-10-20 with CEO message.' });
     assert.equal(noAi.status, 502);
+  });
+});
+
+// ---------------------------------------------------------------
+// Calendar booking & release pipeline
+// ---------------------------------------------------------------
+describe('calendar & release pipeline', () => {
+  let s: TestServer;
+  before(async () => { s = await startServer(); });
+  after(async () => { await s.stop(); });
+
+  const booking = (over: Record<string, unknown> = {}) => ({
+    Channel: 'Desktop Pop-up',
+    Release_Date: daysFromNow(20),
+    Release_Time: '11:00',
+    Department: 'HR',
+    Campaign_Name: 'Wellness Week',
+    Subject_Line: 'Join Wellness Week',
+    Business_SPOC: 'Priya',
+    ...over,
+  });
+
+  it('seeds a Release SPOC and sample communications', async () => {
+    const { json } = await s.api(ADMIN, 'GET', '/api/db');
+    assert.ok(json.communications.length >= 2, 'seed communications present');
+    assert.ok(json.users.some((u: any) => u.Role === 'Release'), 'release SPOC seeded');
+  });
+
+  it('lets IC book a slot and blocks vendors', async () => {
+    const ok = await s.api(ADMIN, 'POST', '/api/communications', booking());
+    assert.equal(ok.status, 201);
+    assert.equal(ok.json.communication.Status, 'Booked');
+    const vendor = await s.api(PIXEL_VENDOR, 'POST', '/api/communications', booking({ Release_Time: '15:00' }));
+    assert.equal(vendor.status, 403);
+  });
+
+  it('prevents double-booking the same slot', async () => {
+    await s.api(ADMIN, 'POST', '/api/communications', booking({ Release_Time: '12:00', Campaign_Name: 'A' }));
+    const clash = await s.api(ADMIN, 'POST', '/api/communications', booking({ Release_Time: '12:00', Campaign_Name: 'B' }));
+    assert.equal(clash.status, 409);
+  });
+
+  it('runs the full pipeline: create task -> ready -> handoff -> release', async () => {
+    const booked = await s.api(ADMIN, 'POST', '/api/communications', booking({ Release_Time: '14:00' }));
+    const id = booked.json.communication.Comm_ID;
+
+    const task = await s.api(ADMIN, 'POST', `/api/communications/${id}/create-task`, { Assigned_Vendor_ID: 'v-pixel' });
+    assert.equal(task.status, 201);
+    assert.equal(task.json.communication.Status, 'In Design');
+    assert.equal(task.json.task.Asset_Type, 'Desktop Pop-up');
+
+    const ready = await s.api(ADMIN, 'POST', `/api/communications/${id}/ready`, { Creative_Link: 'https://onedrive.com/x' });
+    assert.equal(ready.json.communication.Status, 'Ready');
+
+    const handoff = await s.api(ADMIN, 'POST', `/api/communications/${id}/handoff`, { Sender_ID: 'HR@company' });
+    assert.equal(handoff.json.communication.Status, 'Handed Off');
+
+    // SPOC sees only handed-off/released
+    const spocView = await s.api(RELEASE_SPOC, 'GET', '/api/db');
+    assert.ok(spocView.json.communications.every((c: any) => c.Status === 'Handed Off' || c.Status === 'Released'));
+
+    // IC cannot release; SPOC can
+    const icRelease = await s.api(ADMIN, 'POST', `/api/communications/${id}/release`);
+    assert.equal(icRelease.status, 403);
+    const released = await s.api(RELEASE_SPOC, 'POST', `/api/communications/${id}/release`);
+    assert.equal(released.status, 200);
+    assert.equal(released.json.communication.Status, 'Released');
+    assert.equal(released.json.communication.Released_By, 'Ravi Menon');
+  });
+
+  it('auto-advances a booking to Ready when its linked creative is approved', async () => {
+    // seed c-1 is linked to t-1 (In Design); submit + approve a deliverable
+    const del = await s.api(PIXEL_VENDOR, 'POST', '/api/deliverables', {
+      Task_ID: 't-1', File_URL: 'https://img/x.png', File_Name: 'x.png'
+    });
+    assert.equal(del.status, 201);
+    await s.api(ADMIN, 'POST', `/api/deliverables/${del.json.deliverable.Deliverable_ID}/review`, {
+      status: 'Approved', comment: 'Good'
+    });
+    const { json } = await s.api(ADMIN, 'GET', '/api/db');
+    const c1 = json.communications.find((c: any) => c.Comm_ID === 'c-1');
+    assert.equal(c1.Status, 'Ready');
+    assert.ok(c1.Creative_Link, 'creative link auto-filled');
+  });
+
+  it('vendors and the release SPOC cannot see the calendar (RLS)', async () => {
+    const vendor = await s.api(PIXEL_VENDOR, 'GET', '/api/db');
+    assert.equal(vendor.json.communications.length, 0);
+  });
+
+  it('rejects invalid bookings', async () => {
+    assert.equal((await s.api(ADMIN, 'POST', '/api/communications', booking({ Channel: 'Telepathy' }))).status, 400);
+    assert.equal((await s.api(ADMIN, 'POST', '/api/communications', booking({ Release_Date: '20/20/2020' }))).status, 400);
+    assert.equal((await s.api(ADMIN, 'POST', '/api/communications', booking({ Campaign_Name: '' }))).status, 400);
   });
 });

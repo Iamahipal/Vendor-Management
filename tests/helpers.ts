@@ -9,6 +9,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 
 // Seed identities (src/seed.ts) used throughout the tests
 export const ADMIN = 'u-pfl-admin';        // Internal — Sarah Jenkins
+export const RELEASE_SPOC = 'u-release-spoc'; // Release SPOC — Ravi Menon
 export const PIXEL_VENDOR = 'u-pixel-vendor'; // Vendor v-pixel — Alex Rivero
 export const PRESS_VENDOR = 'u-press-vendor'; // Vendor v-press — Marcus Vance
 export const MODAL_VENDOR = 'u-modal-vendor'; // Vendor v-modal — Chloe Wu

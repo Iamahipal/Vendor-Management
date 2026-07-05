@@ -1,4 +1,7 @@
-export type Role = 'Internal' | 'Vendor';
+// 'Internal' = IC team (book slots, brief vendors, hand off to release);
+// 'Vendor' = external agency (creatives); 'Release' = the release SPOC who
+// pushes communications live via Factorial and marks them Released.
+export type Role = 'Internal' | 'Vendor' | 'Release';
 
 // Full internal-communications channel catalogue: internal (Snapcoms-deployed),
 // social/employer branding, and offline/print. The original five names are
@@ -98,11 +101,88 @@ export interface NotificationLog {
   };
 }
 
+// -------------------------------------------------------------
+// CALENDAR / RELEASE PIPELINE
+// A Communication is a booked slot on the IC calendar. It flows:
+//   Booked -> In Design (if a creative is needed) -> Ready ->
+//   Handed Off (release form sent to SPOC) -> Released.
+// -------------------------------------------------------------
+
+// The "Type of communication" from the Release Request Form. Channels that
+// need a designed asset map to an AssetType (see CHANNEL_ASSET_TYPE).
+export type CommsChannel =
+  | 'Email'
+  | 'MS Teams'
+  | 'Sigma Notification'
+  | 'SMS'
+  | 'Wallpaper / Lockscreen'
+  | 'Ticker'
+  | 'Desktop Pop-up'
+  | 'Survey'
+  | 'Open Banner'
+  | 'DMS-Sales Notification'
+  | 'Bulletin';
+
+export const COMMS_CHANNELS: CommsChannel[] = [
+  'Email', 'MS Teams', 'Sigma Notification', 'SMS', 'Wallpaper / Lockscreen',
+  'Ticker', 'Desktop Pop-up', 'Survey', 'Open Banner', 'DMS-Sales Notification', 'Bulletin'
+];
+
+// Fixed daily booking slots (from the IC calendar). Adjustable when the exact
+// sheet arrives — one booking per (date, time, channel).
+export const SLOT_TIMES = ['10:00', '11:00', '11:30', '12:00', '14:00', '15:00', '16:30', '17:00'];
+
+// Channels that typically need a designed creative → default vendor asset type.
+// Channels not listed here are text/config-only and need no creative.
+export const CHANNEL_ASSET_TYPE: Partial<Record<CommsChannel, AssetType>> = {
+  'Email': 'Emailer',
+  'Desktop Pop-up': 'Desktop Pop-up',
+  'Ticker': 'Ticker / Teams Notification',
+  'MS Teams': 'Ticker / Teams Notification',
+  'Wallpaper / Lockscreen': 'Desktop Wallpaper',
+  'Open Banner': 'Offline Banner',
+  'Bulletin': 'Poster / Print'
+};
+
+export type CommStatus = 'Booked' | 'In Design' | 'Ready' | 'Handed Off' | 'Released' | 'Cancelled';
+
+export type Audience = 'All Employees' | 'Targeted';
+export type CommLanguage = 'English' | 'Vernacular';
+
+export interface Communication {
+  Comm_ID: string;
+  // Booking core
+  Channel: CommsChannel;
+  Release_Date: string;   // YYYY-MM-DD
+  Release_Time: string;   // one of SLOT_TIMES (or custom)
+  Department: string;     // requesting team
+  Campaign_Name: string;
+  Subject_Line: string;
+  Comms_SPOC: string;     // IC owner handling it
+  Business_SPOC: string;  // requester-side owner
+  Audience: Audience;
+  Language: CommLanguage;
+  // Release-form (handoff) fields
+  CTA_Text?: string;
+  CTA_Link?: string;
+  Sender_ID?: string;
+  Creative_Link?: string; // OneDrive link to final creative
+  // Links & lifecycle
+  Linked_Task_ID?: string; // vendor creative task, if any
+  Status: CommStatus;
+  Created_At: string;
+  Handed_Off_At?: string;
+  Released_At?: string;
+  Released_By?: string;
+  Notes?: string;
+}
+
 export interface DatabaseState {
   users: User[];
   vendors: Vendor[];
   tasks: Task[];
   deliverables: Deliverable[];
+  communications: Communication[];
   logs: NotificationLog[];
   user?: User;
 }
