@@ -154,7 +154,7 @@ export const DEFAULT_DB: DatabaseState = {
   communications: [
     {
       Comm_ID: 'c-1',
-      Channel: 'Email',
+      Channel: 'Mail',
       Release_Date: '2026-07-06',
       Release_Time: '12:00',
       Department: 'L&D',
@@ -163,7 +163,9 @@ export const DEFAULT_DB: DatabaseState = {
       Comms_SPOC: 'Niharika Srivastava',
       Business_SPOC: 'Sneha Sharma',
       Audience: 'All Employees',
-      Language: 'English',
+      Languages: ['English'],
+      Sub_Type: 'Mailer',
+      Category: 'Important',
       Sender_ID: 'Learning@company',
       Linked_Task_ID: 't-1',
       Status: 'In Design',
@@ -180,9 +182,52 @@ export const DEFAULT_DB: DatabaseState = {
       Comms_SPOC: 'Naythan Vaz',
       Business_SPOC: 'Harshad Joshi',
       Audience: 'All Employees',
-      Language: 'English',
+      Languages: ['English'],
+      Category: 'Critical',
       Status: 'Ready',
       Created_At: '2026-06-30T10:00:00.000Z'
+    }
+  ],
+  placements: [
+    {
+      Placement_ID: 'p-1',
+      Surface: 'Wallpaper',
+      Start_Date: '2026-07-06',
+      End_Date: '2026-07-12',
+      Business_Unit: 'IT',
+      Campaign_Theme: 'New Password Policy',
+      Comms_SPOC: 'Naythan Vaz',
+      Business_SPOC: 'Prasad Mali',
+      Audience: 'All Employees',
+      Status: 'Live',
+      Created_At: '2026-07-01T08:00:00.000Z'
+    },
+    {
+      Placement_ID: 'p-2',
+      Surface: 'Lockscreen',
+      Start_Date: '2026-07-06',
+      End_Date: '2026-07-12',
+      Business_Unit: 'C&B',
+      Campaign_Theme: "Goal Setting FY'27",
+      Comms_SPOC: 'Tushangi Rastogi',
+      Business_SPOC: 'Rashi Pathade',
+      Audience: 'All Employees',
+      Status: 'Planned',
+      Created_At: '2026-07-01T08:05:00.000Z'
+    }
+  ],
+  webinars: [
+    {
+      Webinar_ID: 'w-1',
+      Date: '2026-07-10',
+      Start_Time: '15:00',
+      End_Time: '16:00',
+      Department: 'L&D',
+      Topic: 'NMIMS Executive MBA Webinar',
+      Host: 'NMIMS',
+      Comms_SPOC: 'Monika Mishra',
+      Audience: 'All Employees',
+      Created_At: '2026-06-25T10:00:00.000Z'
     }
   ],
   logs: [

@@ -48,6 +48,11 @@ interface InternalDashboardProps {
   onCreateDesignTask: (id: string, vendorId: string) => Promise<boolean>;
   onMarkReady: (id: string, creativeLink?: string) => Promise<boolean>;
   onHandoff: (id: string, fields: Record<string, unknown>) => Promise<boolean>;
+  onAddPlacement: (fields: Record<string, unknown>) => Promise<boolean>;
+  onEditPlacement: (id: string, fields: Record<string, unknown>) => Promise<boolean>;
+  onDeletePlacement: (id: string) => Promise<boolean>;
+  onAddWebinar: (fields: Record<string, unknown>) => Promise<boolean>;
+  onDeleteWebinar: (id: string) => Promise<boolean>;
 }
 
 export default function InternalDashboard({
@@ -68,8 +73,13 @@ export default function InternalDashboard({
   onCreateDesignTask,
   onMarkReady,
   onHandoff,
+  onAddPlacement,
+  onEditPlacement,
+  onDeletePlacement,
+  onAddWebinar,
+  onDeleteWebinar,
 }: InternalDashboardProps) {
-  const { tasks = [], vendors = [], deliverables = [], users = [], communications = [] } = dbState;
+  const { tasks = [], vendors = [], deliverables = [], users = [], communications = [], placements = [], webinars = [] } = dbState;
 
   // Cancelled requests stay in the database (History) but leave the board
   const activeTasks = tasks.filter(t => t.Status !== 'Cancelled');
@@ -277,6 +287,8 @@ export default function InternalDashboard({
       {view === 'calendar' ? (
         <CalendarPanel
           communications={communications}
+          placements={placements}
+          webinars={webinars}
           vendors={vendors}
           tasks={tasks}
           onBook={onBookSlot}
@@ -286,6 +298,11 @@ export default function InternalDashboard({
           onMarkReady={onMarkReady}
           onHandoff={onHandoff}
           onOpenTask={(taskId) => { setView('board'); setDetailTaskId(taskId); }}
+          onAddPlacement={onAddPlacement}
+          onEditPlacement={onEditPlacement}
+          onDeletePlacement={onDeletePlacement}
+          onAddWebinar={onAddWebinar}
+          onDeleteWebinar={onDeleteWebinar}
         />
       ) : view === 'vendors' ? (
         <VendorsPanel

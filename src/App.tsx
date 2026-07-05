@@ -36,6 +36,8 @@ export default function App() {
     tasks: [],
     deliverables: [],
     communications: [],
+    placements: [],
+    webinars: [],
     logs: []
   });
 
@@ -367,6 +369,20 @@ export default function App() {
   const handleRelease = (id: string) =>
     commAction(`/api/communications/${id}/release`, 'POST', undefined, 'could not mark released.').then(d => !!d);
 
+  // Weekly placements (Wallpaper / Lockscreen / banners)
+  const handleAddPlacement = (fields: Record<string, unknown>) =>
+    commAction('/api/placements', 'POST', fields, 'could not book the placement.').then(d => !!d);
+  const handleEditPlacement = (id: string, fields: Record<string, unknown>) =>
+    commAction(`/api/placements/${id}`, 'PATCH', fields, 'could not save the placement.').then(d => !!d);
+  const handleDeletePlacement = (id: string) =>
+    commAction(`/api/placements/${id}`, 'DELETE', undefined, 'could not remove the placement.').then(d => !!d);
+
+  // Webinars
+  const handleAddWebinar = (fields: Record<string, unknown>) =>
+    commAction('/api/webinars', 'POST', fields, 'could not schedule the webinar.').then(d => !!d);
+  const handleDeleteWebinar = (id: string) =>
+    commAction(`/api/webinars/${id}`, 'DELETE', undefined, 'could not remove the webinar.').then(d => !!d);
+
   // API Call: Post back-and-forth feedback comment on a deliverable
   const handlePostFeedback = async (deliverableId: string, comment: string) => {
     try {
@@ -568,6 +584,11 @@ export default function App() {
                 onCreateDesignTask={handleCreateDesignTask}
                 onMarkReady={handleMarkReady}
                 onHandoff={handleHandoff}
+                onAddPlacement={handleAddPlacement}
+                onEditPlacement={handleEditPlacement}
+                onDeletePlacement={handleDeletePlacement}
+                onAddWebinar={handleAddWebinar}
+                onDeleteWebinar={handleDeleteWebinar}
               />
             ) : currentUser?.Role === 'Release' ? (
               <ReleaseDesk dbState={dbState} onRelease={handleRelease} />

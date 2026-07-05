@@ -108,60 +108,121 @@ export interface NotificationLog {
 //   Handed Off (release form sent to SPOC) -> Released.
 // -------------------------------------------------------------
 
-// The "Type of communication" from the Release Request Form. Channels that
-// need a designed asset map to an AssetType (see CHANNEL_ASSET_TYPE).
+// The internal-comms channels that get booked on the daily calendar,
+// matching the IC calendar sheet. Channels that need a designed asset map
+// to an AssetType (see CHANNEL_ASSET_TYPE).
 export type CommsChannel =
-  | 'Email'
-  | 'MS Teams'
-  | 'Sigma Notification'
-  | 'SMS'
-  | 'Wallpaper / Lockscreen'
-  | 'Ticker'
+  | 'Mail'
   | 'Desktop Pop-up'
-  | 'Survey'
-  | 'Open Banner'
-  | 'DMS-Sales Notification'
-  | 'Bulletin';
+  | 'Sigma'
+  | 'MS Teams'
+  | 'Ticker'
+  | 'Sales One'
+  | 'DMS'
+  | 'BFL Social'
+  | 'SMS'
+  | 'Snapcomms';
 
 export const COMMS_CHANNELS: CommsChannel[] = [
-  'Email', 'MS Teams', 'Sigma Notification', 'SMS', 'Wallpaper / Lockscreen',
-  'Ticker', 'Desktop Pop-up', 'Survey', 'Open Banner', 'DMS-Sales Notification', 'Bulletin'
+  'Mail', 'Desktop Pop-up', 'Sigma', 'MS Teams', 'Ticker',
+  'Sales One', 'DMS', 'BFL Social', 'SMS', 'Snapcomms'
 ];
 
-// Fixed daily booking slots (from the IC calendar). Adjustable when the exact
-// sheet arrives — one booking per (date, time, channel).
-export const SLOT_TIMES = ['10:00', '11:00', '11:30', '12:00', '14:00', '15:00', '16:30', '17:00'];
+// Day-of-week numbers: 0=Sun … 6=Sat
+export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+// Scheduling rules per channel, from the sheet's SCHEDULE tab: the default
+// slot time(s), which weekdays it runs, its recommended frequency, and
+// whether it typically needs a designed creative. `days: null` = every day.
+export interface ChannelRule {
+  times: string[];
+  days: Weekday[] | null;
+  frequency: string;
+  needsCreative: boolean;
+  note?: string;
+}
+
+export const CHANNEL_RULES: Record<CommsChannel, ChannelRule> = {
+  'Mail':          { times: ['10:00', '12:00', '15:00', '17:00'], days: null, frequency: '4 / day (+ as needed)', needsCreative: true },
+  'Desktop Pop-up':{ times: ['11:00'], days: null, frequency: '1 / day', needsCreative: true, note: "Can't share a time with Ticker" },
+  'Sigma':         { times: ['11:30'], days: [5, 6], frequency: '1 / day (Fri, Sat)', needsCreative: false },
+  'MS Teams':      { times: ['16:30'], days: null, frequency: '1 / day', needsCreative: false },
+  'Ticker':        { times: ['14:00'], days: null, frequency: '1 / day', needsCreative: false, note: "Can't share a time with Pop-up" },
+  'Sales One':     { times: ['09:30'], days: [1, 3], frequency: '1 / day (Mon, Wed)', needsCreative: false },
+  'DMS':           { times: ['11:30'], days: [2, 4], frequency: '1 / day (Tue, Thu)', needsCreative: false },
+  'BFL Social':    { times: [], days: null, frequency: 'Any time', needsCreative: true },
+  'SMS':           { times: ['11:00'], days: null, frequency: 'As needed', needsCreative: false },
+  'Snapcomms':     { times: [], days: null, frequency: 'Any time', needsCreative: false },
+};
+
+// The recommended daily slot grid, in display order (time + channel). Mail
+// also allows extra "as per request" bookings beyond its fixed times.
+export const DAILY_SLOTS: { time: string; channel: CommsChannel }[] = [
+  { time: '09:30', channel: 'Sales One' },
+  { time: '10:00', channel: 'Mail' },
+  { time: '11:00', channel: 'Desktop Pop-up' },
+  { time: '11:00', channel: 'SMS' },
+  { time: '11:30', channel: 'Sigma' },
+  { time: '11:30', channel: 'DMS' },
+  { time: '12:00', channel: 'Mail' },
+  { time: '14:00', channel: 'Ticker' },
+  { time: '15:00', channel: 'Mail' },
+  { time: '16:30', channel: 'MS Teams' },
+  { time: '17:00', channel: 'Mail' },
+];
+
+// The slots that actually apply on a given date, honouring day-of-week rules.
+export function slotsForDate(dateISO: string): { time: string; channel: CommsChannel }[] {
+  const weekday = new Date(dateISO + 'T00:00:00').getDay() as Weekday;
+  return DAILY_SLOTS.filter(s => {
+    const days = CHANNEL_RULES[s.channel].days;
+    return days === null || days.includes(weekday);
+  });
+}
+
+export const SLOT_TIMES = ['09:30', '10:00', '11:00', '11:30', '12:00', '14:00', '15:00', '16:00', '16:30', '17:00'];
 
 // Channels that typically need a designed creative → default vendor asset type.
-// Channels not listed here are text/config-only and need no creative.
 export const CHANNEL_ASSET_TYPE: Partial<Record<CommsChannel, AssetType>> = {
-  'Email': 'Emailer',
+  'Mail': 'Emailer',
   'Desktop Pop-up': 'Desktop Pop-up',
-  'Ticker': 'Ticker / Teams Notification',
   'MS Teams': 'Ticker / Teams Notification',
-  'Wallpaper / Lockscreen': 'Desktop Wallpaper',
-  'Open Banner': 'Offline Banner',
-  'Bulletin': 'Poster / Print'
+  'BFL Social': 'Instagram',
 };
 
 export type CommStatus = 'Booked' | 'In Design' | 'Ready' | 'Handed Off' | 'Released' | 'Cancelled';
 
-export type Audience = 'All Employees' | 'Targeted';
-export type CommLanguage = 'English' | 'Vernacular';
+export type Audience = 'All Employees' | 'BFL All Employees' | 'Targeted' | 'Women Employees' | 'Vernac';
+export const AUDIENCES: Audience[] = ['All Employees', 'BFL All Employees', 'Targeted', 'Women Employees', 'Vernac'];
+
+// Sub-type of a mail-style communication (the "Mailer/Bulletin" column)
+export type CommSubType = 'Mailer' | 'Bulletin' | 'Notification' | 'Mail';
+export const COMM_SUBTYPES: CommSubType[] = ['Mailer', 'Bulletin', 'Notification', 'Mail'];
+
+// Campaign priority category (Sheet2)
+export type CommCategory = 'Critical' | 'Important' | 'General';
+export const COMM_CATEGORIES: CommCategory[] = ['Critical', 'Important', 'General'];
+
+// Languages a communication ships in (multi-select)
+export const COMM_LANGUAGES = ['English', 'Hindi', 'Marathi', 'Bengali', 'Kannada', 'Malayalam', 'Tamil', 'Telugu', 'Gujarati'];
 
 export interface Communication {
   Comm_ID: string;
   // Booking core
   Channel: CommsChannel;
   Release_Date: string;   // YYYY-MM-DD
-  Release_Time: string;   // one of SLOT_TIMES (or custom)
+  Release_Time: string;
   Department: string;     // requesting team
   Campaign_Name: string;
   Subject_Line: string;
   Comms_SPOC: string;     // IC owner handling it
   Business_SPOC: string;  // requester-side owner
   Audience: Audience;
-  Language: CommLanguage;
+  Languages: string[];    // one or more of COMM_LANGUAGES
+  Sub_Type?: CommSubType;
+  Category?: CommCategory;
+  // A reserved-but-empty slot (the sheet's "Blocked" status)
+  Blocked?: boolean;
   // Release-form (handoff) fields
   CTA_Text?: string;
   CTA_Link?: string;
@@ -177,12 +238,53 @@ export interface Communication {
   Notes?: string;
 }
 
+// -------------------------------------------------------------
+// WEEKLY PLACEMENTS — Wallpaper, Lockscreen, and banner surfaces book by the
+// week (Start → End), one campaign per week, not by daily time slot.
+// -------------------------------------------------------------
+export type PlacementSurface = 'Wallpaper' | 'Lockscreen' | 'Croma Banner' | 'Illume Banner';
+export const PLACEMENT_SURFACES: PlacementSurface[] = ['Wallpaper', 'Lockscreen', 'Croma Banner', 'Illume Banner'];
+
+export interface WeeklyPlacement {
+  Placement_ID: string;
+  Surface: PlacementSurface;
+  Start_Date: string; // YYYY-MM-DD (week start)
+  End_Date: string;   // YYYY-MM-DD (week end)
+  Business_Unit: string;
+  Campaign_Theme: string;
+  Comms_SPOC: string;
+  Business_SPOC: string;
+  Audience: string;
+  Status: 'Planned' | 'Blocked' | 'Live';
+  Comments?: string;
+  Created_At: string;
+}
+
+// -------------------------------------------------------------
+// WEBINARS — a separate calendar of scheduled sessions.
+// -------------------------------------------------------------
+export interface Webinar {
+  Webinar_ID: string;
+  Date: string;       // YYYY-MM-DD
+  Start_Time: string;
+  End_Time: string;
+  Department: string;
+  Topic: string;
+  Host: string;
+  Comms_SPOC: string;
+  Audience: string;
+  Views?: number;
+  Created_At: string;
+}
+
 export interface DatabaseState {
   users: User[];
   vendors: Vendor[];
   tasks: Task[];
   deliverables: Deliverable[];
   communications: Communication[];
+  placements: WeeklyPlacement[];
+  webinars: Webinar[];
   logs: NotificationLog[];
   user?: User;
 }

@@ -597,3 +597,168 @@ describe('calendar & release pipeline', () => {
     assert.equal((await s.api(ADMIN, 'POST', '/api/communications', booking({ Campaign_Name: '' }))).status, 400);
   });
 });
+
+// ---------------------------------------------------------------
+// Richer bookings: real channels, languages, the Ticker/Pop-up rule
+// ---------------------------------------------------------------
+describe('richer calendar bookings', () => {
+  let s: TestServer;
+  before(async () => { s = await startServer(); });
+  after(async () => { await s.stop(); });
+
+  const booking = (over: Record<string, unknown> = {}) => ({
+    Channel: 'Mail',
+    Release_Date: daysFromNow(30),
+    Release_Time: '10:00',
+    Department: 'HR',
+    Campaign_Name: 'Townhall Invite',
+    Subject_Line: 'You are invited',
+    Business_SPOC: 'Priya',
+    ...over,
+  });
+
+  it('books a Mail slot with multiple languages and richer fields', async () => {
+    const { status, json } = await s.api(ADMIN, 'POST', '/api/communications', booking({
+      Languages: ['English', 'Hindi', 'Marathi'],
+      Sub_Type: 'Bulletin',
+      Category: 'Critical',
+      Audience: 'BFL All Employees',
+    }));
+    assert.equal(status, 201);
+    assert.deepEqual(json.communication.Languages, ['English', 'Hindi', 'Marathi']);
+    assert.equal(json.communication.Sub_Type, 'Bulletin');
+    assert.equal(json.communication.Category, 'Critical');
+    assert.equal(json.communication.Audience, 'BFL All Employees');
+  });
+
+  it('defaults Languages to English when none supplied', async () => {
+    const { json } = await s.api(ADMIN, 'POST', '/api/communications', booking({ Release_Time: '12:00' }));
+    assert.deepEqual(json.communication.Languages, ['English']);
+  });
+
+  it('creates a blocked slot with a reserved marker', async () => {
+    const { status, json } = await s.api(ADMIN, 'POST', '/api/communications', booking({
+      Release_Time: '15:00', Blocked: true, Campaign_Name: '(Blocked)',
+    }));
+    assert.equal(status, 201);
+    assert.equal(json.communication.Blocked, true);
+  });
+
+  it('forbids Ticker and Desktop Pop-up at the same time (hard conflict)', async () => {
+    const date = daysFromNow(31);
+    const ticker = await s.api(ADMIN, 'POST', '/api/communications', booking({
+      Channel: 'Ticker', Release_Date: date, Release_Time: '14:00', Campaign_Name: 'Scrolling notice',
+    }));
+    assert.equal(ticker.status, 201);
+    const popup = await s.api(ADMIN, 'POST', '/api/communications', booking({
+      Channel: 'Desktop Pop-up', Release_Date: date, Release_Time: '14:00', Campaign_Name: 'Popup notice',
+    }));
+    assert.equal(popup.status, 409);
+    assert.match(popup.json.error, /Ticker and Pop-up can't go at the same time/);
+  });
+
+  it('allows Ticker and Pop-up at different times', async () => {
+    const date = daysFromNow(32);
+    const ticker = await s.api(ADMIN, 'POST', '/api/communications', booking({
+      Channel: 'Ticker', Release_Date: date, Release_Time: '14:00', Campaign_Name: 'Ticker A',
+    }));
+    assert.equal(ticker.status, 201);
+    const popup = await s.api(ADMIN, 'POST', '/api/communications', booking({
+      Channel: 'Desktop Pop-up', Release_Date: date, Release_Time: '11:00', Campaign_Name: 'Popup A',
+    }));
+    assert.equal(popup.status, 201);
+  });
+});
+
+// ---------------------------------------------------------------
+// Weekly placements (Wallpaper / Lockscreen / banners)
+// ---------------------------------------------------------------
+describe('weekly placements', () => {
+  let s: TestServer;
+  before(async () => { s = await startServer(); });
+  after(async () => { await s.stop(); });
+
+  const week = (over: Record<string, unknown> = {}) => ({
+    Surface: 'Wallpaper',
+    Start_Date: daysFromNow(40),
+    End_Date: daysFromNow(46),
+    Campaign_Theme: 'Independence Day',
+    Business_Unit: 'Brand',
+    ...over,
+  });
+
+  it('lets IC book a weekly placement and blocks vendors', async () => {
+    const ok = await s.api(ADMIN, 'POST', '/api/placements', week());
+    assert.equal(ok.status, 201);
+    assert.equal(ok.json.placement.Surface, 'Wallpaper');
+    const vendor = await s.api(PIXEL_VENDOR, 'POST', '/api/placements', week({ Start_Date: daysFromNow(60), End_Date: daysFromNow(66) }));
+    assert.equal(vendor.status, 403);
+  });
+
+  it('rejects an overlapping week on the same surface', async () => {
+    await s.api(ADMIN, 'POST', '/api/placements', week({ Start_Date: daysFromNow(80), End_Date: daysFromNow(86), Campaign_Theme: 'First' }));
+    const clash = await s.api(ADMIN, 'POST', '/api/placements', week({ Start_Date: daysFromNow(84), End_Date: daysFromNow(90), Campaign_Theme: 'Second' }));
+    assert.equal(clash.status, 409);
+    assert.match(clash.json.error, /already booked/);
+  });
+
+  it('allows the same week on a different surface', async () => {
+    const wp = await s.api(ADMIN, 'POST', '/api/placements', week({ Surface: 'Lockscreen', Start_Date: daysFromNow(40), End_Date: daysFromNow(46) }));
+    assert.equal(wp.status, 201);
+  });
+
+  it('edits and deletes a placement', async () => {
+    const created = await s.api(ADMIN, 'POST', '/api/placements', week({ Surface: 'Croma Banner', Start_Date: daysFromNow(100), End_Date: daysFromNow(106) }));
+    const id = created.json.placement.Placement_ID;
+    const edited = await s.api(ADMIN, 'PATCH', `/api/placements/${id}`, { Status: 'Live', Campaign_Theme: 'Updated theme' });
+    assert.equal(edited.status, 200);
+    assert.equal(edited.json.placement.Status, 'Live');
+    assert.equal(edited.json.placement.Campaign_Theme, 'Updated theme');
+    const del = await s.api(ADMIN, 'DELETE', `/api/placements/${id}`);
+    assert.equal(del.status, 200);
+  });
+
+  it('rejects invalid placements', async () => {
+    assert.equal((await s.api(ADMIN, 'POST', '/api/placements', week({ Surface: 'Billboard' }))).status, 400);
+    assert.equal((await s.api(ADMIN, 'POST', '/api/placements', week({ Start_Date: 'nope' }))).status, 400);
+    assert.equal((await s.api(ADMIN, 'POST', '/api/placements', week({ Start_Date: daysFromNow(50), End_Date: daysFromNow(43) }))).status, 400);
+  });
+
+  it('scopes placements to IC only (RLS)', async () => {
+    const vendor = await s.api(PIXEL_VENDOR, 'GET', '/api/db');
+    assert.equal(vendor.json.placements.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------
+// Webinars
+// ---------------------------------------------------------------
+describe('webinars', () => {
+  let s: TestServer;
+  before(async () => { s = await startServer(); });
+  after(async () => { await s.stop(); });
+
+  it('lets IC schedule a webinar and blocks vendors', async () => {
+    const ok = await s.api(ADMIN, 'POST', '/api/webinars', {
+      Date: daysFromNow(15), Topic: 'NMIMS Executive MBA', Host: 'Dr. Rao', Start_Time: '15:00', End_Time: '16:00',
+    });
+    assert.equal(ok.status, 201);
+    assert.equal(ok.json.webinar.Topic, 'NMIMS Executive MBA');
+    const vendor = await s.api(PIXEL_VENDOR, 'POST', '/api/webinars', { Date: daysFromNow(15), Topic: 'Sneaky' });
+    assert.equal(vendor.status, 403);
+  });
+
+  it('rejects a webinar with no topic or a bad date', async () => {
+    assert.equal((await s.api(ADMIN, 'POST', '/api/webinars', { Date: daysFromNow(15) })).status, 400);
+    assert.equal((await s.api(ADMIN, 'POST', '/api/webinars', { Date: 'soon', Topic: 'X' })).status, 400);
+  });
+
+  it('deletes a webinar and scopes them to IC only', async () => {
+    const created = await s.api(ADMIN, 'POST', '/api/webinars', { Date: daysFromNow(20), Topic: 'To remove' });
+    const id = created.json.webinar.Webinar_ID;
+    const del = await s.api(ADMIN, 'DELETE', `/api/webinars/${id}`);
+    assert.equal(del.status, 200);
+    const vendor = await s.api(PIXEL_VENDOR, 'GET', '/api/db');
+    assert.equal(vendor.json.webinars.length, 0);
+  });
+});

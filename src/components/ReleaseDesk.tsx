@@ -96,7 +96,7 @@ function ReleaseCard({ comm, busy, onRelease }: { comm: Communication; busy: boo
       <div className="grid grid-cols-2 gap-x-4 gap-y-2 bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm text-slate-600">
         <div className="col-span-2"><span className="text-xs text-slate-400 block">Subject line</span>{comm.Subject_Line}</div>
         <div><span className="text-xs text-slate-400 block">Audience</span>{comm.Audience}</div>
-        <div><span className="text-xs text-slate-400 block">Language</span>{comm.Language}</div>
+        <div><span className="text-xs text-slate-400 block">Language</span>{comm.Languages?.join(', ') || '—'}</div>
         {comm.Sender_ID && <div><span className="text-xs text-slate-400 block">Sender ID</span>{comm.Sender_ID}</div>}
         {comm.Department && <div className="flex items-start gap-1"><span><span className="text-xs text-slate-400 block">Team</span>{comm.Department}</span></div>}
         {comm.CTA_Text && <div><span className="text-xs text-slate-400 block">CTA text</span>{comm.CTA_Text}</div>}
