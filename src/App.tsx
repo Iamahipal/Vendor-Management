@@ -306,6 +306,28 @@ export default function App() {
   const handleEditVendor = (vendorId: string, fields: Record<string, string>) =>
     apiAction(`/api/vendors/${vendorId}`, 'PATCH', fields, 'could not save vendor details.');
 
+  // API Call: AI organizes raw requirement text into a structured brief draft
+  const handleOrganizeBrief = async (rawText: string) => {
+    try {
+      const res = await apiFetch('/api/ai/organize-brief', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-simulated-user-id': selectedUserId
+        },
+        body: JSON.stringify({ rawText })
+      });
+      const data = await res.json();
+      if (res.ok) return data.draft;
+      pushErrorAlert(data.error || 'AI could not organize the text.');
+      return null;
+    } catch (e) {
+      console.error(e);
+      pushErrorAlert('Network error: AI brief organizer unavailable.');
+      return null;
+    }
+  };
+
   // API Call: Post back-and-forth feedback comment on a deliverable
   const handlePostFeedback = async (deliverableId: string, comment: string) => {
     try {
@@ -500,6 +522,7 @@ export default function App() {
                 onDeleteTask={handleDeleteTask}
                 onAddVendor={handleAddVendor}
                 onEditVendor={handleEditVendor}
+                onOrganizeBrief={handleOrganizeBrief}
               />
             ) : (
               <VendorPortal

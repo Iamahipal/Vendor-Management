@@ -3,7 +3,23 @@ import { DatabaseState, Task, Deliverable, Vendor, AssetType, TaskStatus, ASSET_
 import GlassTile from './GlassTile';
 import TaskDetailModal from './TaskDetailModal';
 import VendorsPanel from './VendorsPanel';
-import { Plus, Filter, Clock, CheckCircle, AlertTriangle, User, Layers, ArrowRight, ExternalLink, FileCode, Check, X, Search, LayoutGrid, Users } from 'lucide-react';
+import HistoryPanel from './HistoryPanel';
+import { Plus, Filter, Clock, CheckCircle, AlertTriangle, User, Layers, ArrowRight, ExternalLink, FileCode, Check, X, Search, LayoutGrid, Users, Archive, Sparkles } from 'lucide-react';
+
+// Asset types grouped by category for the dropdowns
+const ASSET_GROUPS = (['Internal Comms', 'Social Media', 'Offline & Print'] as const).map(cat => ({
+  category: cat,
+  types: (Object.keys(ASSET_TEMPLATES) as AssetType[]).filter(t => ASSET_TEMPLATES[t].category === cat)
+}));
+
+export interface BriefDraft {
+  title: string;
+  asset_type: string;
+  dimensions: string;
+  guidelines: string;
+  requirements: string;
+  due_date: string;
+}
 
 interface InternalDashboardProps {
   dbState: DatabaseState;
@@ -24,6 +40,7 @@ interface InternalDashboardProps {
   onDeleteTask: (taskId: string) => Promise<boolean>;
   onAddVendor: (fields: Record<string, string>) => Promise<boolean>;
   onEditVendor: (vendorId: string, fields: Record<string, string>) => Promise<boolean>;
+  onOrganizeBrief: (rawText: string) => Promise<BriefDraft | null>;
 }
 
 export default function InternalDashboard({
@@ -37,11 +54,21 @@ export default function InternalDashboard({
   onDeleteTask,
   onAddVendor,
   onEditVendor,
+  onOrganizeBrief,
 }: InternalDashboardProps) {
   const { tasks = [], vendors = [], deliverables = [], users = [] } = dbState;
 
-  // Board vs. vendor management view
-  const [view, setView] = useState<'board' | 'vendors'>('board');
+  // Cancelled requests stay in the database (History) but leave the board
+  const activeTasks = tasks.filter(t => t.Status !== 'Cancelled');
+
+  // Board / vendors / history view
+  const [view, setView] = useState<'board' | 'vendors' | 'history'>('board');
+  const [historyVendorId, setHistoryVendorId] = useState<string | null>(null);
+
+  // AI brief organizer state (inside the create form)
+  const [rawBrief, setRawBrief] = useState('');
+  const [isOrganizing, setIsOrganizing] = useState(false);
+  const [organizedBy, setOrganizedBy] = useState<string | null>(null);
 
   // Task detail modal (opens for any card)
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
@@ -84,6 +111,28 @@ export default function InternalDashboard({
     }
     // Initialize default template values
     handleAssetTypeChange('LinkedIn');
+    setRawBrief('');
+    setOrganizedBy(null);
+  };
+
+  // AI: structure the pasted raw requirement into the form fields.
+  // The AI only organizes — the team always reviews before creating.
+  const handleOrganizeClick = async () => {
+    if (!rawBrief.trim() || isOrganizing) return;
+    setIsOrganizing(true);
+    setOrganizedBy(null);
+    const draft = await onOrganizeBrief(rawBrief.trim());
+    setIsOrganizing(false);
+    if (!draft) return;
+    if (draft.asset_type && draft.asset_type in ASSET_TEMPLATES) {
+      handleAssetTypeChange(draft.asset_type as AssetType);
+    }
+    if (draft.title) setNewTitle(draft.title);
+    if (draft.due_date) setNewDueDate(draft.due_date);
+    if (draft.dimensions) setCustomDimensions(draft.dimensions);
+    if (draft.guidelines) setCustomGuidelines(draft.guidelines);
+    if (draft.requirements) setCustomRequirements(draft.requirements);
+    setOrganizedBy('AI organized the text below into the form — please check every field before creating.');
   };
 
   const handleCreateTask = async (e: FormEvent) => {
@@ -127,7 +176,7 @@ export default function InternalDashboard({
 
   // Filter tasks (asset type, vendor, and free-text search across title/id/vendor)
   const query = searchQuery.trim().toLowerCase();
-  const filteredTasks = tasks.filter(task => {
+  const filteredTasks = activeTasks.filter(task => {
     const matchAsset = filterAssetType === 'ALL' || task.Asset_Type === filterAssetType;
     const matchVendor = filterVendor === 'ALL' || task.Assigned_Vendor_ID === filterVendor;
     const matchSearch = !query
@@ -138,7 +187,7 @@ export default function InternalDashboard({
   });
 
   // Overdue awareness for the toolbar
-  const overdueCount = tasks.filter(t => getDueUrgency(t)?.tone === 'overdue').length;
+  const overdueCount = activeTasks.filter(t => getDueUrgency(t)?.tone === 'overdue').length;
 
   // Kanban Column aggregation
   const columns: { label: string; status: TaskStatus; bg: string; border: string; text: string }[] = [
@@ -173,7 +222,7 @@ export default function InternalDashboard({
     <div id="internal-dashboard" className="space-y-6 animate-fade-in">
 
       {/* Board / Vendors view toggle */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={() => setView('board')}
           className={`py-2 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all cursor-pointer ${
@@ -192,6 +241,15 @@ export default function InternalDashboard({
           <Users className="h-4 w-4" />
           Vendors ({vendors.length})
         </button>
+        <button
+          onClick={() => { setHistoryVendorId(null); setView('history'); }}
+          className={`py-2 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+            view === 'history' ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <Archive className="h-4 w-4" />
+          History
+        </button>
       </div>
 
       {view === 'vendors' ? (
@@ -199,8 +257,19 @@ export default function InternalDashboard({
           vendors={vendors}
           users={users}
           tasks={tasks}
+          deliverables={deliverables}
           onAddVendor={onAddVendor}
           onEditVendor={onEditVendor}
+          onViewHistory={(vendorId) => { setHistoryVendorId(vendorId); setView('history'); }}
+        />
+      ) : view === 'history' ? (
+        <HistoryPanel
+          key={historyVendorId ?? 'all'}
+          tasks={tasks}
+          vendors={vendors}
+          deliverables={deliverables}
+          initialVendorId={historyVendorId}
+          onOpenTask={(taskId) => setDetailTaskId(taskId)}
         />
       ) : (
       <>
@@ -209,14 +278,14 @@ export default function InternalDashboard({
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <GlassTile className="border-slate-200 bg-white hover:bg-slate-50 transition-all shadow-xs">
           <span className="text-slate-500 text-[10px] font-mono uppercase tracking-wider block">ALL REQUESTS</span>
-          <span className="text-3xl font-extrabold font-sans mt-2 text-slate-900">{tasks.length}</span>
+          <span className="text-3xl font-extrabold font-sans mt-2 text-slate-900">{activeTasks.length}</span>
           <span className="text-[10px] text-slate-400 mt-1 font-mono">everything in flight</span>
         </GlassTile>
 
         <GlassTile className="border-amber-200 bg-amber-50/30">
           <span className="text-amber-700 text-[10px] font-mono uppercase tracking-wider block">BEING MADE</span>
           <span className="text-3xl font-extrabold font-sans mt-2 text-amber-900">
-            {tasks.filter(t => t.Status === 'In Progress').length}
+            {activeTasks.filter(t => t.Status === 'In Progress').length}
           </span>
           <span className="text-[10px] text-amber-600 mt-1 font-mono">vendors working on these</span>
         </GlassTile>
@@ -224,7 +293,7 @@ export default function InternalDashboard({
         <GlassTile className="border-blue-200 bg-blue-50/30">
           <span className="text-blue-700 text-[10px] font-mono uppercase tracking-wider block">READY FOR REVIEW</span>
           <span className="text-3xl font-extrabold font-sans mt-2 text-blue-900">
-            {tasks.filter(t => t.Status === 'Delivered').length}
+            {activeTasks.filter(t => t.Status === 'Delivered').length}
           </span>
           <span className="text-[10px] text-blue-600 mt-1 font-mono">waiting on you</span>
         </GlassTile>
@@ -232,7 +301,7 @@ export default function InternalDashboard({
         <GlassTile className="border-rose-200 bg-rose-50/30">
           <span className="text-rose-700 text-[10px] font-mono uppercase tracking-wider block">CHANGES NEEDED</span>
           <span className="text-3xl font-extrabold font-sans mt-2 text-rose-900">
-            {tasks.filter(t => t.Status === 'Needs Revision').length}
+            {activeTasks.filter(t => t.Status === 'Needs Revision').length}
           </span>
           <span className="text-[10px] text-rose-600 mt-1 font-mono">back with the vendor</span>
         </GlassTile>
@@ -240,7 +309,7 @@ export default function InternalDashboard({
         <GlassTile className="border-emerald-200 bg-emerald-50/30 col-span-2 md:col-span-1">
           <span className="text-emerald-700 text-[10px] font-mono uppercase tracking-wider block">APPROVED</span>
           <span className="text-3xl font-extrabold font-sans mt-2 text-emerald-900">
-            {tasks.filter(t => t.Status === 'Approved').length}
+            {activeTasks.filter(t => t.Status === 'Approved').length}
           </span>
           <span className="text-[10px] text-emerald-600 mt-1 font-mono">all done</span>
         </GlassTile>
@@ -278,11 +347,11 @@ export default function InternalDashboard({
               className="bg-transparent text-xs font-sans font-semibold text-slate-700 outline-none cursor-pointer"
             >
               <option value="ALL">All Asset Types</option>
-              <option value="LinkedIn">LinkedIn Creative</option>
-              <option value="Emailer">Email Header</option>
-              <option value="Desktop Pop-up">Desktop Pop-up</option>
-              <option value="Instagram">Instagram (1:1)</option>
-              <option value="Offline Banner">Offline Banner</option>
+              {ASSET_GROUPS.map(g => (
+                <optgroup key={g.category} label={g.category}>
+                  {g.types.map(t => <option key={t} value={t}>{t}</option>)}
+                </optgroup>
+              ))}
             </select>
           </div>
 
@@ -398,7 +467,7 @@ export default function InternalDashboard({
                                 {urgency.label}
                               </span>
                             ) : (
-                              <div className="flex items-center gap-1 text-[11px] text-slate-500 font-mono">
+                              <div className="flex items-center gap-1 text-[11px] text-slate-500 font-mono whitespace-nowrap shrink-0">
                                 <Clock className="h-3 w-3 shrink-0 text-slate-400" />
                                 <span>{task.Due_Date.substring(5)}</span>
                               </div>
@@ -407,19 +476,19 @@ export default function InternalDashboard({
 
                           {/* Latest Deliverable Version badge */}
                           {taskDels.length > 0 && (
-                            <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-[10px] font-mono">
-                              <span className="text-slate-600 flex items-center gap-1 truncate max-w-[140px]">
+                            <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between gap-2 text-[10px] font-mono">
+                              <span className="text-slate-600 flex items-center gap-1 flex-1 min-w-0">
                                 <FileCode className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                                {latestDel.File_Name}
+                                <span className="truncate">{latestDel.File_Name}</span>
                               </span>
 
                               {task.Status === 'Delivered' ? (
-                                <span className="text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded text-[9px] uppercase font-bold tracking-wide animate-pulse">
+                                <span className="text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded text-[9px] uppercase font-bold tracking-wide animate-pulse whitespace-nowrap shrink-0">
                                   Review now
                                 </span>
                               ) : (
-                                <span className="text-slate-500">
-                                  v{latestDel.Version} {latestDel.Approval_Status}
+                                <span className="text-slate-500 whitespace-nowrap shrink-0">
+                                  v{latestDel.Version} · {latestDel.Approval_Status === 'Pending' ? 'Waiting' : latestDel.Approval_Status}
                                 </span>
                               )}
                             </div>
@@ -470,6 +539,34 @@ export default function InternalDashboard({
 
             {/* Form */}
             <form onSubmit={handleCreateTask} className="p-6 space-y-4 max-h-[500px] overflow-y-auto">
+
+              {/* AI brief organizer: paste raw team requirement, get a structured draft */}
+              <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 space-y-2">
+                <div className="flex items-center gap-2 text-violet-900 text-xs font-bold">
+                  <Sparkles className="h-4 w-4 text-violet-600" />
+                  Got a raw requirement from a team? Paste it — AI fills the form (it only organizes, never changes the content).
+                </div>
+                <textarea
+                  rows={3}
+                  value={rawBrief}
+                  onChange={(e) => setRawBrief(e.target.value)}
+                  placeholder={'Paste the email / Teams message here, e.g.:\n"Hi team, we need an emailer for the Diwali celebration on 20th Oct, festive but corporate look, must include the CEO message and RSVP link..."'}
+                  className="w-full bg-white border border-violet-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-violet-400"
+                />
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={handleOrganizeClick}
+                    disabled={isOrganizing || !rawBrief.trim()}
+                    className="py-1.5 px-3 bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    {isOrganizing ? 'Organizing...' : 'Organize with AI'}
+                  </button>
+                  {organizedBy && <span className="text-[11px] text-violet-700">{organizedBy}</span>}
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Title */}
                 <div className="space-y-1.5 md:col-span-2">
@@ -492,11 +589,11 @@ export default function InternalDashboard({
                     onChange={(e) => handleAssetTypeChange(e.target.value as AssetType)}
                     className="w-full bg-white border border-slate-200 rounded-lg px-4 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400 font-sans transition-all cursor-pointer"
                   >
-                    <option value="LinkedIn">LinkedIn Creative (1200x627)</option>
-                    <option value="Emailer">Email Header Header (600px)</option>
-                    <option value="Desktop Pop-up">Desktop Modal Popup (800x500)</option>
-                    <option value="Instagram">Instagram Square (1080x1080)</option>
-                    <option value="Offline Banner">Offline Banner Banner (10x3 ft)</option>
+                    {ASSET_GROUPS.map(g => (
+                      <optgroup key={g.category} label={g.category}>
+                        {g.types.map(t => <option key={t} value={t}>{t}</option>)}
+                      </optgroup>
+                    ))}
                   </select>
                 </div>
 

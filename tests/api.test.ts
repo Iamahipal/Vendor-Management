@@ -57,7 +57,8 @@ describe('row-level security on reads (/api/db)', () => {
     const { status, json } = await s.api(ADMIN, 'GET', '/api/db');
     assert.equal(status, 200);
     assert.equal(json.tasks.length, 4);
-    assert.equal(json.vendors.length, 3);
+    // 3 external agencies + the seeded In-house Team
+    assert.equal(json.vendors.length, 4);
     assert.equal(json.rlsSimulation.applied, false);
   });
 
@@ -441,5 +442,63 @@ describe('AI critique endpoint (no providers configured)', () => {
     assert.equal(json.task.Status, 'In Progress');
     const last = json.deliverable.Feedback_History.at(-1);
     assert.equal(last.source, 'AI');
+  });
+});
+
+// ---------------------------------------------------------------
+// Long-term history & metrics foundations
+// ---------------------------------------------------------------
+describe('history & metrics foundations', () => {
+  let s: TestServer;
+  before(async () => { s = await startServer(); });
+  after(async () => { await s.stop(); });
+
+  it('seeds the In-house Team vendor for Snapcoms work', async () => {
+    const { json } = await s.api(ADMIN, 'GET', '/api/db');
+    const inhouse = json.vendors.find((v: any) => v.Vendor_ID === 'v-inhouse');
+    assert.ok(inhouse, 'v-inhouse must exist');
+    assert.match(inhouse.Company_Name, /In-house/);
+  });
+
+  it('cancelling keeps the task in the database as Cancelled', async () => {
+    const del = await s.api(ADMIN, 'DELETE', '/api/tasks/t-2');
+    assert.equal(del.status, 200);
+    const { json } = await s.api(ADMIN, 'GET', '/api/db');
+    const t2 = json.tasks.find((t: any) => t.Task_ID === 't-2');
+    assert.ok(t2, 'cancelled task must remain for history');
+    assert.equal(t2.Status, 'Cancelled');
+    // double-cancel is rejected
+    const again = await s.api(ADMIN, 'DELETE', '/api/tasks/t-2');
+    assert.equal(again.status, 400);
+  });
+
+  it('stamps Approved_At when a deliverable is approved', async () => {
+    const { status, json } = await s.api(ADMIN, 'POST', '/api/deliverables/d-2/review', {
+      status: 'Approved', comment: 'Great work'
+    });
+    assert.equal(status, 200);
+    assert.ok(json.task.Approved_At, 'Approved_At must be set');
+    assert.equal(json.task.Status, 'Approved');
+  });
+
+  it('accepts new asset types from the expanded catalogue', async () => {
+    const { status, json } = await s.api(ADMIN, 'POST', '/api/tasks', {
+      Title: 'Republic Day lock screen',
+      Asset_Type: 'Lock Screen Wallpaper',
+      Assigned_Vendor_ID: 'v-inhouse',
+      Due_Date: '2099-01-20'
+    });
+    assert.equal(status, 201);
+    assert.match(json.task.Requirements, /lower-center third/);
+  });
+
+  it('brief organizer requires internal role and raw text', async () => {
+    const vendor = await s.api(PIXEL_VENDOR, 'POST', '/api/ai/organize-brief', { rawText: 'some long enough requirement text' });
+    assert.equal(vendor.status, 403);
+    const short = await s.api(ADMIN, 'POST', '/api/ai/organize-brief', { rawText: 'hi' });
+    assert.equal(short.status, 400);
+    // with no AI keys configured the organizer reports 502, never a crash
+    const noAi = await s.api(ADMIN, 'POST', '/api/ai/organize-brief', { rawText: 'We need a Diwali emailer for all employees by 2099-10-20 with CEO message.' });
+    assert.equal(noAi.status, 502);
   });
 });

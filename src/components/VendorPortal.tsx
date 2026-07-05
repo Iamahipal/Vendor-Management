@@ -61,7 +61,9 @@ export default function VendorPortal({
   // Filter tasks belonging exclusively to current vendor based on RLS isolation logic,
   // sorted by deadline so the most urgent work is always at the top
   const byDueDate = (a: Task, b: Task) => a.Due_Date.localeCompare(b.Due_Date);
-  const vendorTasks = tasks.filter(t => t.Assigned_Vendor_ID === user?.Vendor_ID).sort(byDueDate);
+  const vendorTasks = tasks
+    .filter(t => t.Assigned_Vendor_ID === user?.Vendor_ID && t.Status !== 'Cancelled')
+    .sort(byDueDate);
   const selectedTask = selectedTaskId ? vendorTasks.find(t => t.Task_ID === selectedTaskId) || null : null;
 
   // 1. "New Requests" -> Tasks in status 'Assigned'
@@ -273,26 +275,26 @@ export default function VendorPortal({
                     )}
 
                     {task.Status === 'In Progress' && (
-                      <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 px-2 py-1 rounded font-mono font-bold uppercase">
+                      <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 px-2 py-1 rounded font-mono font-bold uppercase whitespace-nowrap shrink-0">
                         In Progress
                       </span>
                     )}
 
                     {task.Status === 'Delivered' && (
-                      <span className="text-[10px] bg-blue-50 text-blue-800 border border-blue-200 px-2 py-1 rounded font-mono font-bold uppercase">
+                      <span className="text-[10px] bg-blue-50 text-blue-800 border border-blue-200 px-2 py-1 rounded font-mono font-bold uppercase whitespace-nowrap shrink-0">
                         Waiting for review (v{dels.length})
                       </span>
                     )}
 
                     {task.Status === 'Approved' && (
-                      <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-1 rounded font-mono font-bold uppercase flex items-center gap-1">
+                      <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-1 rounded font-mono font-bold uppercase whitespace-nowrap shrink-0 flex items-center gap-1">
                         <CheckCircle className="h-3 w-3" />
                         Approved
                       </span>
                     )}
 
                     {task.Status === 'Needs Revision' && (
-                      <span className="text-[10px] bg-rose-50 text-rose-800 border border-rose-200 px-2 py-1 rounded font-mono font-bold uppercase">
+                      <span className="text-[10px] bg-rose-50 text-rose-800 border border-rose-200 px-2 py-1 rounded font-mono font-bold uppercase whitespace-nowrap shrink-0">
                         Changes requested
                       </span>
                     )}
@@ -477,8 +479,8 @@ export default function VendorPortal({
                       {taskDeliverables.map(del => (
                         <div key={del.Deliverable_ID} className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2 text-xs">
                           <div className="flex justify-between items-center text-[10px] font-mono text-slate-500">
-                            <span className="truncate max-w-[140px]">{del.File_Name} (v{del.Version})</span>
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                            <span className="truncate min-w-0 flex-1">{del.File_Name} (v{del.Version})</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold whitespace-nowrap shrink-0 ${
                               del.Approval_Status === 'Approved' ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' :
                               del.Approval_Status === 'Rejected' ? 'bg-rose-50 border border-rose-200 text-rose-700' :
                               'bg-amber-50 border border-amber-200 text-amber-700'

@@ -1,13 +1,16 @@
 import { useState, FormEvent } from 'react';
-import { Vendor, User, Task, getDueUrgency } from '../types';
-import { Plus, Pencil, Mail, UserRound, X } from 'lucide-react';
+import { Vendor, User, Task, Deliverable, getDueUrgency, INHOUSE_VENDOR_ID } from '../types';
+import { computeVendorMetrics } from '../metrics';
+import { Plus, Pencil, Mail, UserRound, X, History, Building2 } from 'lucide-react';
 
 interface VendorsPanelProps {
   vendors: Vendor[];
   users: User[];
   tasks: Task[];
+  deliverables: Deliverable[];
   onAddVendor: (fields: Record<string, string>) => Promise<boolean>;
   onEditVendor: (vendorId: string, fields: Record<string, string>) => Promise<boolean>;
+  onViewHistory: (vendorId: string) => void;
 }
 
 interface VendorFormState {
@@ -20,7 +23,7 @@ interface VendorFormState {
 const EMPTY_FORM: VendorFormState = { Company_Name: '', Specialty: '', Contact_Name: '', Contact_Email: '' };
 
 // Manage the vendor list: add new vendors, edit details, see workload.
-export default function VendorsPanel({ vendors, users, tasks, onAddVendor, onEditVendor }: VendorsPanelProps) {
+export default function VendorsPanel({ vendors, users, tasks, deliverables, onAddVendor, onEditVendor, onViewHistory }: VendorsPanelProps) {
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<VendorFormState>(EMPTY_FORM);
@@ -133,39 +136,71 @@ export default function VendorsPanel({ vendors, users, tasks, onAddVendor, onEdi
       {/* Vendor cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {vendors.map(vendor => {
+          const isInhouse = vendor.Vendor_ID === INHOUSE_VENDOR_ID;
           const contact = contactFor(vendor.Vendor_ID);
           const vendorTasks = tasks.filter(t => t.Assigned_Vendor_ID === vendor.Vendor_ID);
-          const active = vendorTasks.filter(t => t.Status !== 'Approved').length;
           const overdue = vendorTasks.filter(t => getDueUrgency(t)?.tone === 'overdue').length;
+          const m = computeVendorMetrics(vendor.Vendor_ID, tasks, deliverables);
+          const scoreColor = m.score === null ? '' : m.score >= 80 ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : m.score >= 60 ? 'text-amber-700 bg-amber-50 border-amber-200' : 'text-rose-700 bg-rose-50 border-rose-200';
 
           return (
             <div key={vendor.Vendor_ID} className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-3">
               <div className="flex justify-between items-start gap-2">
                 <div className="min-w-0">
-                  <h3 className="font-bold text-sm text-slate-900 truncate">{vendor.Company_Name}</h3>
+                  <h3 className="font-bold text-sm text-slate-900 truncate flex items-center gap-1.5">
+                    {isInhouse && <Building2 className="h-4 w-4 text-slate-400 shrink-0" />}
+                    {vendor.Company_Name}
+                  </h3>
                   <p className="text-xs text-slate-500 mt-0.5">{vendor.Specialty}</p>
                 </div>
-                <button
-                  onClick={() => startEdit(vendor)}
-                  className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-700 transition-all cursor-pointer shrink-0"
-                  title="Edit vendor"
-                >
-                  <Pencil className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-1 shrink-0">
+                  {/* Auto quality score (vendors only — not meaningful for in-house) */}
+                  {!isInhouse && m.score !== null && (
+                    <span className={`px-2 py-1 rounded-lg border text-sm font-extrabold ${scoreColor}`} title="Auto quality score: rejections and delays each cost up to 50 points">
+                      {m.score}
+                    </span>
+                  )}
+                  {!isInhouse && (
+                    <button
+                      onClick={() => startEdit(vendor)}
+                      className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-700 transition-all cursor-pointer"
+                      title="Edit vendor"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
               </div>
 
               {contact && (
                 <div className="text-sm text-slate-600 space-y-1">
-                  <div className="flex items-center gap-1.5"><UserRound className="h-3.5 w-3.5 text-slate-400" />{contact.Name}</div>
-                  <div className="flex items-center gap-1.5 truncate"><Mail className="h-3.5 w-3.5 text-slate-400" />{contact.Email || '—'}</div>
+                  <div className="flex items-center gap-1.5 min-w-0"><UserRound className="h-3.5 w-3.5 text-slate-400 shrink-0" /><span className="truncate">{contact.Name}</span></div>
+                  <div className="flex items-center gap-1.5 min-w-0"><Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" /><span className="truncate">{contact.Email || '—'}</span></div>
                 </div>
               )}
 
-              <div className="flex gap-2 pt-2 border-t border-slate-100 text-xs">
-                <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded-lg font-semibold">{active} active</span>
+              {/* Auto metrics — computed from every take and approval ever recorded */}
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-slate-500 pt-2 border-t border-slate-100">
+                <span>Completed: <b className="text-slate-800">{m.completed}</b></span>
+                <span>Active: <b className="text-slate-800">{m.active}</b></span>
+                <span>Wrong takes: <b className={m.wrongTakes > 0 ? 'text-rose-600' : 'text-slate-800'}>{m.wrongTakes}</b></span>
+                <span>On-time: <b className="text-slate-800">{m.onTimeRate === null ? '—' : Math.round(m.onTimeRate * 100) + '%'}</b></span>
+                {m.avgTakesPerApproval !== null && (
+                  <span className="col-span-2">Avg. takes per approval: <b className="text-slate-800">{m.avgTakesPerApproval.toFixed(1)}</b></span>
+                )}
+              </div>
+
+              <div className="flex gap-2 items-center pt-2 border-t border-slate-100 text-xs">
                 {overdue > 0 && (
                   <span className="bg-rose-50 border border-rose-200 text-rose-700 px-2 py-1 rounded-lg font-bold">{overdue} overdue</span>
                 )}
+                <button
+                  onClick={() => onViewHistory(vendor.Vendor_ID)}
+                  className="ml-auto flex items-center gap-1 text-slate-500 hover:text-slate-900 font-semibold cursor-pointer"
+                >
+                  <History className="h-3.5 w-3.5" />
+                  Full history
+                </button>
               </div>
             </div>
           );
