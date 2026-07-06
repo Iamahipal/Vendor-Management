@@ -1045,11 +1045,11 @@ app.post('/api/communications/:id/handoff', getSecurityContext, (req, res) => {
   res.json({ communication: comm });
 });
 
-// Mark released (Release SPOC only).
+// Mark released (IC team or Release SPOC).
 app.post('/api/communications/:id/release', getSecurityContext, (req, res) => {
   const user = (req as AuthedRequest).user;
-  if (user.Role !== 'Release') {
-    return res.status(403).json({ error: 'Only the release SPOC can mark a communication as released.' });
+  if (user.Role !== 'Release' && user.Role !== 'Internal') {
+    return res.status(403).json({ error: 'Only the IC team or release SPOC can mark a communication as released.' });
   }
   const comm = db.communications.find(c => c.Comm_ID === req.params.id);
   if (!comm) return res.status(404).json({ error: 'Booking not found.' });
