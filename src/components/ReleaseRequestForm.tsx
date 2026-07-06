@@ -1,9 +1,9 @@
 import { useState, FormEvent } from 'react';
 import {
   Communication, CommsChannel, COMMS_CHANNELS, CHANNEL_RULES, CHANNEL_ASSET_TYPE,
-  AUDIENCES, COMM_SUBTYPES, COMM_CATEGORIES, COMM_LANGUAGES, CommSubType, CommCategory,
+  AUDIENCES, COMM_CATEGORIES, COMM_LANGUAGES, CommCategory, STANDARD_RELEASE_TIMES,
 } from '../types';
-import { ClipboardList, Rocket, Clock, CheckCircle2, History } from 'lucide-react';
+import { ClipboardList, Rocket, Clock, CheckCircle2, History, Download } from 'lucide-react';
 
 interface Props {
   communications: Communication[];
@@ -13,6 +13,41 @@ interface Props {
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
+// Indian financial year runs Apr 1 – Mar 31. Bound the date picker to the
+// current FY plus the next five, so bookings can't land on a wrong year.
+function fyBounds() {
+  const now = new Date();
+  const startYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+  return { min: `${startYear}-04-01`, max: `${startYear + 6}-03-31` };
+}
+
+function weekdayLabel(iso: string) {
+  if (!iso) return '';
+  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+// Download every captured release request as a CSV (opens in Excel) so the
+// team always has its own copy of the data, independent of the backup sheet.
+function exportCsv(rows: Communication[]) {
+  const cols: (keyof Communication)[] = [
+    'Comm_ID', 'Status', 'Channel', 'Release_Date', 'Release_Time', 'Campaign_Name', 'Subject_Line',
+    'Department', 'Business_SPOC', 'Comms_SPOC', 'Audience', 'Languages', 'Category',
+    'Creative_Link', 'Sender_ID', 'CTA_Text', 'CTA_Link', 'Released_By', 'Released_At', 'Created_At',
+  ];
+  const esc = (v: unknown) => {
+    const s = v == null ? '' : Array.isArray(v) ? v.join('; ') : String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const csv = [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `release-requests-${todayISO()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // The Release Request form: a single MS-Forms-style intake that captures every
 // detail and hands the communication off for release. Submitted requests sit in
 // a queue below, ready to be marked released.
@@ -21,15 +56,16 @@ export default function ReleaseRequestForm({ communications, onSubmit, onRelease
   const [done, setDone] = useState(false);
   const [channel, setChannel] = useState<CommsChannel>('Mail');
   const [date, setDate] = useState(todayISO());
-  const [time, setTime] = useState(CHANNEL_RULES['Mail'].times[0] ?? '10:00');
+  const [time, setTime] = useState('10:00');
+  const [specialTime, setSpecialTime] = useState(false);
   const [campaign, setCampaign] = useState('');
   const [subject, setSubject] = useState('');
   const [department, setDepartment] = useState('');
   const [businessSpoc, setBusinessSpoc] = useState('');
   const [audience, setAudience] = useState<string>('All Employees');
   const [languages, setLanguages] = useState<string[]>(['English']);
-  const [subType, setSubType] = useState<CommSubType | ''>('');
   const [category, setCategory] = useState<CommCategory | ''>('');
+  const { min: fyMin, max: fyMax } = fyBounds();
   const [creativeLink, setCreativeLink] = useState('');
   const [senderId, setSenderId] = useState('');
   const [ctaText, setCtaText] = useState('');
@@ -41,7 +77,7 @@ export default function ReleaseRequestForm({ communications, onSubmit, onRelease
 
   const reset = () => {
     setCampaign(''); setSubject(''); setDepartment(''); setBusinessSpoc('');
-    setAudience('All Employees'); setLanguages(['English']); setSubType(''); setCategory('');
+    setAudience('All Employees'); setLanguages(['English']); setCategory('');
     setCreativeLink(''); setSenderId(''); setCtaText(''); setCtaLink('');
   };
 
@@ -51,7 +87,7 @@ export default function ReleaseRequestForm({ communications, onSubmit, onRelease
     const ok = await onSubmit({
       Channel: channel, Release_Date: date, Release_Time: time,
       Campaign_Name: campaign, Subject_Line: subject, Department: department, Business_SPOC: businessSpoc,
-      Audience: audience, Languages: languages, Sub_Type: subType || undefined, Category: category || undefined,
+      Audience: audience, Languages: languages, Category: category || undefined,
       Creative_Link: creativeLink || undefined, Sender_ID: senderId || undefined,
       CTA_Text: ctaText || undefined, CTA_Link: ctaLink || undefined,
     });
@@ -71,9 +107,15 @@ export default function ReleaseRequestForm({ communications, onSubmit, onRelease
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center gap-2 text-slate-500 text-sm">
-        <ClipboardList className="h-4 w-4" />
-        Fill in the details of the communication you want released. Submitting hands it off for release.
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-slate-500 text-sm">
+          <ClipboardList className="h-4 w-4" />
+          Fill in the details of the communication you want released. Submitting hands it off for release.
+        </div>
+        <button type="button" onClick={() => exportCsv(communications)} disabled={communications.length === 0}
+          className="py-2 px-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-semibold flex items-center gap-2 cursor-pointer disabled:opacity-50 shrink-0">
+          <Download className="h-4 w-4" />Download all ({communications.length})
+        </button>
       </div>
 
       <form onSubmit={submit} className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5 shadow-xs">
@@ -83,7 +125,7 @@ export default function ReleaseRequestForm({ communications, onSubmit, onRelease
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="space-y-1">
               <label className={label}>Channel *</label>
-              <select value={channel} onChange={e => { const ch = e.target.value as CommsChannel; setChannel(ch); if (CHANNEL_RULES[ch].times[0]) setTime(CHANNEL_RULES[ch].times[0]); }}
+              <select value={channel} onChange={e => setChannel(e.target.value as CommsChannel)}
                 className={input + ' cursor-pointer'}>
                 {COMMS_CHANNELS.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
@@ -91,11 +133,21 @@ export default function ReleaseRequestForm({ communications, onSubmit, onRelease
             </div>
             <div className="space-y-1">
               <label className={label}>Target date *</label>
-              <input type="date" required value={date} onChange={e => setDate(e.target.value)} className={input} />
+              <input type="date" required value={date} min={fyMin} max={fyMax} onChange={e => setDate(e.target.value)} className={input} />
+              <p className="text-[11px] text-slate-400">{weekdayLabel(date)}</p>
             </div>
             <div className="space-y-1">
               <label className={label}>Time *</label>
-              <input type="text" required value={time} onChange={e => setTime(e.target.value)} placeholder="HH:MM" className={input} />
+              {specialTime ? (
+                <input type="text" required value={time} onChange={e => setTime(e.target.value)} placeholder="HH:MM" className={input} />
+              ) : (
+                <select value={time} onChange={e => { if (e.target.value === '__special') { setSpecialTime(true); } else setTime(e.target.value); }}
+                  className={input + ' cursor-pointer'}>
+                  {STANDARD_RELEASE_TIMES.map(t => <option key={t} value={t}>{t}</option>)}
+                  <option value="__special">Special time…</option>
+                </select>
+              )}
+              {specialTime && <button type="button" onClick={() => { setSpecialTime(false); setTime('10:00'); }} className="text-[11px] text-slate-400 hover:text-slate-600 cursor-pointer">← back to standard slots</button>}
             </div>
           </div>
           <div className="space-y-1">
@@ -111,19 +163,12 @@ export default function ReleaseRequestForm({ communications, onSubmit, onRelease
 
         {/* 2. Audience */}
         <fieldset className="space-y-3 border-t border-slate-100 pt-4">
-          <legend className="text-xs font-bold uppercase tracking-wide text-slate-400">2 · Audience & type</legend>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <legend className="text-xs font-bold uppercase tracking-wide text-slate-400">2 · Audience & priority</legend>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-1">
               <label className={label}>Audience</label>
               <select value={audience} onChange={e => setAudience(e.target.value)} className={input + ' cursor-pointer'}>
                 {AUDIENCES.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className={label}>Sub-type</label>
-              <select value={subType} onChange={e => setSubType(e.target.value as CommSubType)} className={input + ' cursor-pointer'}>
-                <option value="">—</option>
-                {COMM_SUBTYPES.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
             <div className="space-y-1">
