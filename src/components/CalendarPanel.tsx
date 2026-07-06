@@ -2,7 +2,7 @@ import { useState, FormEvent } from 'react';
 import {
   Communication, CommsChannel, Vendor, Task, WeeklyPlacement,
   COMMS_CHANNELS, CHANNEL_ASSET_TYPE, CommStatus, CHANNEL_RULES, slotsForDate,
-  AUDIENCES, COMM_SUBTYPES, COMM_CATEGORIES, COMM_LANGUAGES, CommCategory, CommSubType
+  AUDIENCES, COMM_CATEGORIES, COMM_LANGUAGES, CommCategory
 } from '../types';
 import WeeklyPlacementsPanel from './WeeklyPlacementsPanel';
 import {
@@ -293,7 +293,6 @@ function BookingForm({ preset, onClose, onBook }: {
   const [businessSpoc, setBusinessSpoc] = useState('');
   const [audience, setAudience] = useState<string>('All Employees');
   const [languages, setLanguages] = useState<string[]>(['English']);
-  const [subType, setSubType] = useState<CommSubType | ''>('');
   const [category, setCategory] = useState<CommCategory | ''>('');
 
   const rule = CHANNEL_RULES[channel];
@@ -311,7 +310,7 @@ function BookingForm({ preset, onClose, onBook }: {
     await onBook({
       Channel: channel, Release_Date: date, Release_Time: time,
       Campaign_Name: campaign, Subject_Line: subject, Department: department, Business_SPOC: businessSpoc,
-      Audience: audience, Languages: languages, Sub_Type: subType || undefined, Category: category || undefined,
+      Audience: audience, Languages: languages, Category: category || undefined,
       Blocked: isBlock || undefined,
     });
     setBusy(false);
@@ -378,14 +377,6 @@ function BookingForm({ preset, onClose, onBook }: {
                   <label className="text-slate-600 text-xs font-semibold">Business SPOC</label>
                   <input type="text" value={businessSpoc} onChange={e => setBusinessSpoc(e.target.value)}
                     className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-slate-400" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-slate-600 text-xs font-semibold">Sub-type</label>
-                  <select value={subType} onChange={e => setSubType(e.target.value as CommSubType)}
-                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none cursor-pointer">
-                    <option value="">—</option>
-                    {COMM_SUBTYPES.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
                 </div>
                 <div className="space-y-1">
                   <label className="text-slate-600 text-xs font-semibold">Priority</label>

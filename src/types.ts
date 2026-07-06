@@ -114,6 +114,8 @@ export interface NotificationLog {
 export type CommsChannel =
   | 'Mail'
   | 'Desktop Pop-up'
+  | 'Desktop Wallpaper'
+  | 'Lockscreen Wallpaper'
   | 'Sigma'
   | 'MS Teams'
   | 'Ticker'
@@ -124,7 +126,7 @@ export type CommsChannel =
   | 'Snapcomms';
 
 export const COMMS_CHANNELS: CommsChannel[] = [
-  'Mail', 'Desktop Pop-up', 'Sigma', 'MS Teams', 'Ticker',
+  'Mail', 'Desktop Pop-up', 'Desktop Wallpaper', 'Lockscreen Wallpaper', 'Sigma', 'MS Teams', 'Ticker',
   'Sales One', 'DMS', 'BFL Social', 'SMS', 'Snapcomms'
 ];
 
@@ -145,6 +147,8 @@ export interface ChannelRule {
 export const CHANNEL_RULES: Record<CommsChannel, ChannelRule> = {
   'Mail':          { times: ['10:00', '12:00', '15:00', '17:00'], days: null, frequency: '4 / day (+ as needed)', needsCreative: true },
   'Desktop Pop-up':{ times: ['11:00'], days: null, frequency: '1 / day', needsCreative: true, note: "Can't share a time with Ticker" },
+  'Desktop Wallpaper':  { times: [], days: null, frequency: 'Weekly (one campaign per week)', needsCreative: true },
+  'Lockscreen Wallpaper':{ times: [], days: null, frequency: 'Weekly (one campaign per week)', needsCreative: true },
   'Sigma':         { times: ['11:30'], days: [5, 6], frequency: '1 / day (Fri, Sat)', needsCreative: false },
   'MS Teams':      { times: ['16:30'], days: null, frequency: '1 / day', needsCreative: false },
   'Ticker':        { times: ['14:00'], days: null, frequency: '1 / day', needsCreative: false, note: "Can't share a time with Pop-up" },
@@ -186,14 +190,20 @@ export const SLOT_TIMES = ['09:30', '10:00', '11:00', '11:30', '12:00', '14:00',
 export const CHANNEL_ASSET_TYPE: Partial<Record<CommsChannel, AssetType>> = {
   'Mail': 'Emailer',
   'Desktop Pop-up': 'Desktop Pop-up',
+  'Desktop Wallpaper': 'Desktop Wallpaper',
+  'Lockscreen Wallpaper': 'Lock Screen Wallpaper',
   'MS Teams': 'Ticker / Teams Notification',
   'BFL Social': 'Instagram',
 };
 
+// The four standard release slots (from the IC calendar). Other times are
+// possible on request — the form offers a "special time" override.
+export const STANDARD_RELEASE_TIMES = ['10:00', '12:00', '15:00', '17:00'];
+
 export type CommStatus = 'Booked' | 'In Design' | 'Ready' | 'Handed Off' | 'Released' | 'Cancelled';
 
-export type Audience = 'All Employees' | 'BFL All Employees' | 'Targeted' | 'Women Employees' | 'Vernac';
-export const AUDIENCES: Audience[] = ['All Employees', 'BFL All Employees', 'Targeted', 'Women Employees', 'Vernac'];
+export type Audience = 'All Employees' | 'Targeted';
+export const AUDIENCES: Audience[] = ['All Employees', 'Targeted'];
 
 // Sub-type of a mail-style communication (the "Mailer/Bulletin" column)
 export type CommSubType = 'Mailer' | 'Bulletin' | 'Notification' | 'Mail';
@@ -203,8 +213,9 @@ export const COMM_SUBTYPES: CommSubType[] = ['Mailer', 'Bulletin', 'Notification
 export type CommCategory = 'Critical' | 'Important' | 'General';
 export const COMM_CATEGORIES: CommCategory[] = ['Critical', 'Important', 'General'];
 
-// Languages a communication ships in (multi-select)
-export const COMM_LANGUAGES = ['English', 'Hindi', 'Marathi', 'Bengali', 'Kannada', 'Malayalam', 'Tamil', 'Telugu', 'Gujarati'];
+// Languages a communication ships in (multi-select). "Vernac" covers the
+// regional/vernacular languages as a single choice.
+export const COMM_LANGUAGES = ['English', 'Vernac'];
 
 export interface Communication {
   Comm_ID: string;

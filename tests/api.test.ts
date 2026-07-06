@@ -626,16 +626,19 @@ describe('richer calendar bookings', () => {
 
   it('books a Mail slot with multiple languages and richer fields', async () => {
     const { status, json } = await s.api(ADMIN, 'POST', '/api/communications', booking({
-      Languages: ['English', 'Hindi', 'Marathi'],
-      Sub_Type: 'Bulletin',
+      Languages: ['English', 'Vernac'],
       Category: 'Critical',
-      Audience: 'BFL All Employees',
+      Audience: 'Targeted',
     }));
     assert.equal(status, 201);
-    assert.deepEqual(json.communication.Languages, ['English', 'Hindi', 'Marathi']);
-    assert.equal(json.communication.Sub_Type, 'Bulletin');
+    assert.deepEqual(json.communication.Languages, ['English', 'Vernac']);
     assert.equal(json.communication.Category, 'Critical');
-    assert.equal(json.communication.Audience, 'BFL All Employees');
+    assert.equal(json.communication.Audience, 'Targeted');
+  });
+
+  it('rejects an audience outside the allowed set', async () => {
+    const { status } = await s.api(ADMIN, 'POST', '/api/communications', booking({ Release_Time: '11:00', Audience: 'Everyone Everywhere' }));
+    assert.equal(status, 400);
   });
 
   it('defaults Languages to English when none supplied', async () => {
