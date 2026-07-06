@@ -1,18 +1,16 @@
 import { useEffect, useState, useRef } from 'react';
 import { DatabaseState, User, TaskStatus, AssetType } from './types';
 import { DEMO_MODE, demoFetch, resetDemoDb } from './demoApi';
-import InternalDashboard from './components/InternalDashboard';
-import VendorPortal from './components/VendorPortal';
-import ReleaseDesk from './components/ReleaseDesk';
-import HelpGuide from './components/HelpGuide';
-import ActivityFeed from './components/ActivityFeed';
+import VendorDashboard from './components/VendorDashboard';
+import HomeScreen, { HomeView } from './components/HomeScreen';
+import CalendarPanel from './components/CalendarPanel';
+import ReleaseRequestForm from './components/ReleaseRequestForm';
 import {
-  UserCheck,
   RefreshCw,
   X,
   Bell,
   Sparkles,
-  HelpCircle,
+  Home as HomeIcon,
   Compass
 } from 'lucide-react';
 
@@ -45,19 +43,8 @@ export default function App() {
   const [selectedUserId, setSelectedUserId] = useState<string>('u-pfl-admin');
   const [loading, setLoading] = useState(true);
 
-  // Step-by-step guide: opens automatically on the very first visit
-  const [showGuide, setShowGuide] = useState<boolean>(() => {
-    try {
-      return !localStorage.getItem('creativeflow-guide-seen');
-    } catch {
-      return false;
-    }
-  });
-
-  const closeGuide = () => {
-    setShowGuide(false);
-    try { localStorage.setItem('creativeflow-guide-seen', '1'); } catch { /* private mode */ }
-  };
+  // Which of the three areas is open (home = the tile picker)
+  const [view, setView] = useState<'home' | HomeView>('home');
 
   // Live Toast notifications queue
   const [alerts, setAlerts] = useState<AlertNotification[]>([]);
@@ -369,6 +356,18 @@ export default function App() {
   const handleRelease = (id: string) =>
     commAction(`/api/communications/${id}/release`, 'POST', undefined, 'could not mark released.').then(d => !!d);
 
+  // Release Request form: book the slot then immediately hand it off for release
+  const handleCreateReleaseRequest = async (fields: Record<string, unknown>) => {
+    const booked = await commAction('/api/communications', 'POST', fields, 'could not save the release request.');
+    if (!booked?.communication) return false;
+    const id = booked.communication.Comm_ID;
+    const handed = await commAction(`/api/communications/${id}/handoff`, 'POST', {
+      Sender_ID: fields.Sender_ID, Creative_Link: fields.Creative_Link,
+      CTA_Text: fields.CTA_Text, CTA_Link: fields.CTA_Link,
+    }, 'saved, but could not hand it off.');
+    return !!handed;
+  };
+
   // Weekly placements (Wallpaper / Lockscreen / banners)
   const handleAddPlacement = (fields: Record<string, unknown>) =>
     commAction('/api/placements', 'POST', fields, 'could not book the placement.').then(d => !!d);
@@ -436,6 +435,17 @@ export default function App() {
 
   const currentUser = (dbState.users || []).find(u => u.User_ID === selectedUserId);
 
+  // Bookings landing in the current Mon–Sun week (home tile metric)
+  const _now = new Date();
+  const _weekStart = new Date(_now);
+  _weekStart.setDate(_now.getDate() - ((_now.getDay() + 6) % 7));
+  const _weekEnd = new Date(_weekStart);
+  _weekEnd.setDate(_weekStart.getDate() + 6);
+  const wkStart = _weekStart.toISOString().slice(0, 10);
+  const wkEnd = _weekEnd.toISOString().slice(0, 10);
+  const bookedThisWeekCount = (dbState.communications || [])
+    .filter(c => c.Status !== 'Cancelled' && c.Release_Date >= wkStart && c.Release_Date <= wkEnd).length;
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col relative overflow-hidden font-sans">
       
@@ -471,60 +481,29 @@ export default function App() {
       </div>
 
       {/* Global Application Header bar */}
-      <header className="sticky top-0 z-40 bg-white border-b border-slate-200 px-6 py-4 flex flex-col lg:flex-row items-center justify-between gap-4 shadow-xs">
-        
-        {/* Title branding logo */}
+      <header className="sticky top-0 z-40 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between gap-4 shadow-xs">
+
+        {/* Title branding logo — click to go home */}
         <div className="flex items-center gap-3">
-          <div className="h-9 w-9 bg-slate-900 rounded-lg flex items-center justify-center shadow-xs">
+          <button onClick={() => setView('home')} aria-label="Home"
+            className="h-9 w-9 bg-slate-900 rounded-lg flex items-center justify-center shadow-xs cursor-pointer">
             <Compass className="h-5 w-5 text-white" />
-          </div>
+          </button>
           <div>
             <h1 className="font-sans font-bold text-base tracking-tight text-slate-900">
               CreativeFlow Hub
             </h1>
-            <p className="text-xs text-slate-500 font-medium">Design work with your vendors, in one place</p>
+            <p className="text-xs text-slate-500 font-medium">Bajaj Finance · Internal Communication</p>
           </div>
-          <button
-            onClick={() => setShowGuide(true)}
-            className="ml-2 py-1.5 px-3 bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 hover:text-slate-900 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
-          >
-            <HelpCircle className="h-3.5 w-3.5" />
-            How it works
+        </div>
+
+        {view !== 'home' && (
+          <button onClick={() => setView('home')}
+            className="py-2 px-4 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 hover:text-slate-900 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all cursor-pointer">
+            <HomeIcon className="h-4 w-4" />
+            Home
           </button>
-        </div>
-
-        {/* Persona switcher (demo) */}
-        <div className="flex flex-wrap lg:flex-nowrap items-center gap-2 bg-slate-100 border border-slate-200 p-1.5 rounded-xl w-full lg:w-auto">
-          <div className="text-xs text-slate-500 font-semibold px-2 flex items-center gap-1">
-            <UserCheck className="h-3.5 w-3.5 text-slate-600" />
-            Viewing as:
-          </div>
-
-          <div className="grid grid-cols-2 sm:flex gap-1 w-full sm:w-auto">
-            {(dbState.users || []).map(u => {
-              const isActive = u.User_ID === selectedUserId;
-              return (
-                <button
-                  key={u.User_ID}
-                  onClick={() => setSelectedUserId(u.User_ID)}
-                  className={`px-3 py-1.5 rounded-lg font-sans text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-                    isActive
-                      ? 'bg-slate-900 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                  }`}
-                >
-                  <img
-                    src={u.Avatar}
-                    alt={u.Name}
-                    referrerPolicy="no-referrer"
-                    className="h-4 w-4 rounded-full object-cover border border-slate-300 shrink-0"
-                  />
-                  <span className="truncate max-w-[95px]">{u.Name.split(' ')[0]} ({u.Role === 'Internal' ? 'IC Team' : u.Role === 'Release' ? 'Release' : 'Vendor'})</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        )}
       </header>
 
       {/* Main Container Wrapper */}
@@ -536,7 +515,7 @@ export default function App() {
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-violet-600 shrink-0" />
               <span>
-                <span className="font-bold">Interactive demo</span> — everything runs in your browser and is saved locally. Try switching personas, creating briefs, and submitting files. AI critiques are offline here (they need private API keys).
+                <span className="font-bold">Interactive demo</span> — everything runs in your browser and is saved on this device. Try booking slots, submitting a release request, and briefing vendors.
               </span>
             </div>
             <button
@@ -548,71 +527,60 @@ export default function App() {
           </div>
         )}
 
-        {/* Friendly greeting instead of security jargon banners */}
-        {currentUser && currentUser.Role !== 'Release' && (
-          <p className="text-sm text-slate-500">
-            {currentUser.Role === 'Vendor'
-              ? `Hi ${currentUser.Name.split(' ')[0]} — here are the requests for ${dbState.vendors[0]?.Company_Name || 'your team'}.`
-              : `Hi ${currentUser.Name.split(' ')[0]} — the calendar, vendor work and releases, all in one place.`}
-          </p>
-        )}
-
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
             <RefreshCw className="h-6 w-6 text-slate-500 animate-spin" />
             <span className="text-sm text-slate-400">Loading...</span>
           </div>
+        ) : view === 'home' ? (
+          <HomeScreen
+            userName={currentUser?.Name?.split(' ')[0]}
+            counts={{
+              openRequests: (dbState.communications || []).filter(c => c.Status === 'Handed Off').length,
+              bookedThisWeek: bookedThisWeekCount,
+              activeTasks: (dbState.tasks || []).filter(t => t.Status !== 'Cancelled' && t.Status !== 'Approved').length,
+            }}
+            onOpen={setView}
+          />
+        ) : view === 'release' ? (
+          <ReleaseRequestForm
+            communications={dbState.communications || []}
+            onSubmit={handleCreateReleaseRequest}
+            onRelease={handleRelease}
+          />
+        ) : view === 'calendar' ? (
+          <CalendarPanel
+            communications={dbState.communications || []}
+            placements={dbState.placements || []}
+            vendors={dbState.vendors || []}
+            tasks={dbState.tasks || []}
+            onBook={handleBookSlot}
+            onEdit={handleEditBooking}
+            onCancel={handleCancelBooking}
+            onCreateTask={handleCreateDesignTask}
+            onMarkReady={handleMarkReady}
+            onHandoff={handleHandoff}
+            onOpenTask={() => setView('vendor')}
+            onAddPlacement={handleAddPlacement}
+            onEditPlacement={handleEditPlacement}
+            onDeletePlacement={handleDeletePlacement}
+          />
         ) : (
-          <>
-            {/* Conditional Rendering of Dashboards based on Security Context Role */}
-            {currentUser?.Role === 'Internal' ? (
-              <InternalDashboard
-                dbState={dbState}
-                onAddTask={handleAddTask}
-                onReviewDeliverable={handleReviewDeliverable}
-                onUpdateTaskStatus={handleUpdateTaskStatus}
-                onPostFeedback={handlePostFeedback}
-                onPostTaskComment={handlePostTaskComment}
-                onEditTask={handleEditTask}
-                onDeleteTask={handleDeleteTask}
-                onAddVendor={handleAddVendor}
-                onEditVendor={handleEditVendor}
-                onOrganizeBrief={handleOrganizeBrief}
-                onBookSlot={handleBookSlot}
-                onEditBooking={handleEditBooking}
-                onCancelBooking={handleCancelBooking}
-                onCreateDesignTask={handleCreateDesignTask}
-                onMarkReady={handleMarkReady}
-                onHandoff={handleHandoff}
-                onAddPlacement={handleAddPlacement}
-                onEditPlacement={handleEditPlacement}
-                onDeletePlacement={handleDeletePlacement}
-                onAddWebinar={handleAddWebinar}
-                onDeleteWebinar={handleDeleteWebinar}
-              />
-            ) : currentUser?.Role === 'Release' ? (
-              <ReleaseDesk dbState={dbState} onRelease={handleRelease} />
-            ) : (
-              <VendorPortal
-                dbState={dbState}
-                onSubmitDeliverable={handleSubmitDeliverable}
-                onUpdateTaskStatus={handleUpdateTaskStatus}
-                onRequestAICritique={handleRequestAICritique}
-                onPostFeedback={handlePostFeedback}
-                onPostTaskComment={handlePostTaskComment}
-              />
-            )}
-
-            {/* Plain-language recent activity for the internal team */}
-            {currentUser?.Role === 'Internal' && (
-              <ActivityFeed logs={dbState.logs || []} />
-            )}
-          </>
+          <VendorDashboard
+            dbState={dbState}
+            onAddTask={handleAddTask}
+            onReviewDeliverable={handleReviewDeliverable}
+            onUpdateTaskStatus={handleUpdateTaskStatus}
+            onPostFeedback={handlePostFeedback}
+            onPostTaskComment={handlePostTaskComment}
+            onEditTask={handleEditTask}
+            onDeleteTask={handleDeleteTask}
+            onAddVendor={handleAddVendor}
+            onEditVendor={handleEditVendor}
+            onOrganizeBrief={handleOrganizeBrief}
+          />
         )}
       </main>
-
-      {/* Step-by-step guide (auto-opens on first visit) */}
-      {showGuide && <HelpGuide onClose={closeGuide} />}
 
       {/* Global Footer */}
       <footer className="border-t border-slate-200 bg-slate-100 p-4 text-center text-xs text-slate-500">

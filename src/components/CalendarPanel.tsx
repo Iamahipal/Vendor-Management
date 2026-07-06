@@ -1,20 +1,18 @@
 import { useState, FormEvent } from 'react';
 import {
-  Communication, CommsChannel, Vendor, Task, WeeklyPlacement, Webinar,
+  Communication, CommsChannel, Vendor, Task, WeeklyPlacement,
   COMMS_CHANNELS, CHANNEL_ASSET_TYPE, CommStatus, CHANNEL_RULES, slotsForDate,
   AUDIENCES, COMM_SUBTYPES, COMM_CATEGORIES, COMM_LANGUAGES, CommCategory, CommSubType
 } from '../types';
 import WeeklyPlacementsPanel from './WeeklyPlacementsPanel';
-import WebinarsPanel from './WebinarsPanel';
 import {
   CalendarDays, Plus, X, Clock, Building2, Palette, Send, CheckCircle2, Trash2,
-  ChevronLeft, ChevronRight, Ban, LayoutList, Grid3x3, ImageIcon, Video, BarChart3, AlertTriangle
+  ChevronLeft, ChevronRight, Ban, ImageIcon, AlertTriangle, Grid3x3, CalendarRange
 } from 'lucide-react';
 
 interface CalendarPanelProps {
   communications: Communication[];
   placements: WeeklyPlacement[];
-  webinars: Webinar[];
   vendors: Vendor[];
   tasks: Task[];
   onBook: (fields: Record<string, unknown>) => Promise<boolean>;
@@ -27,8 +25,6 @@ interface CalendarPanelProps {
   onAddPlacement: (fields: Record<string, unknown>) => Promise<boolean>;
   onEditPlacement: (id: string, fields: Record<string, unknown>) => Promise<boolean>;
   onDeletePlacement: (id: string) => Promise<boolean>;
-  onAddWebinar: (fields: Record<string, unknown>) => Promise<boolean>;
-  onDeleteWebinar: (id: string) => Promise<boolean>;
 }
 
 const STATUS_STYLE: Record<CommStatus, string> = {
@@ -40,44 +36,63 @@ const STATUS_STYLE: Record<CommStatus, string> = {
   'Cancelled': 'bg-slate-50 text-slate-400 border-slate-200',
 };
 
+const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 function addDays(iso: string, n: number) {
   const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10);
 }
+function addMonths(iso: string, n: number) {
+  const d = new Date(iso + 'T00:00:00'); d.setMonth(d.getMonth() + n); return d.toISOString().slice(0, 10);
+}
+// Monday of the week containing `iso`
+function mondayOf(iso: string) {
+  const d = new Date(iso + 'T00:00:00');
+  const offset = (d.getDay() + 6) % 7; // 0 = Monday
+  d.setDate(d.getDate() - offset);
+  return d.toISOString().slice(0, 10);
+}
+function dayNum(iso: string) { return Number(iso.slice(8, 10)); }
+function monthLabel(iso: string) { return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { month: 'long', year: 'numeric' }); }
+function weekdayShort(iso: string) { return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short' }); }
+function weekRangeLabel(iso: string) {
+  const s = mondayOf(iso); const e = addDays(s, 6);
+  const fmt = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return `${fmt(s)} – ${fmt(e)}`;
+}
+const firstName = (n?: string) => (n ? n.split(' ')[0] : '');
 
 interface BookingPreset { channel?: CommsChannel; time?: string; date?: string; block?: boolean }
 
 export default function CalendarPanel(props: CalendarPanelProps) {
-  const { communications, placements, webinars, vendors, tasks } = props;
-  const [tab, setTab] = useState<'day' | 'agenda' | 'weekly' | 'webinars' | 'report'>('day');
+  const { communications, placements, vendors, tasks } = props;
+  const [tab, setTab] = useState<'calendar' | 'weekly'>('calendar');
+  const [view, setView] = useState<'month' | 'week'>('month');
   const [gridDate, setGridDate] = useState(todayISO());
   const [showBook, setShowBook] = useState<BookingPreset | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string>('ACTIVE');
 
   const active = communications.filter(c => c.Status !== 'Cancelled');
   const detail = detailId ? communications.find(c => c.Comm_ID === detailId) ?? null : null;
 
-  const dateLabel = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
-  const shortDate = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const bookingsOn = (iso: string) => active.filter(c => c.Release_Date === iso)
+    .sort((a, b) => a.Release_Time.localeCompare(b.Release_Time));
+  const bookingAt = (iso: string, time: string, channel: CommsChannel) =>
+    active.find(c => c.Release_Date === iso && c.Release_Time === time && c.Channel === channel);
 
-  // Bookings for the selected day, keyed by "time|channel"
-  const dayBookings = active.filter(c => c.Release_Date === gridDate);
-  const bookingAt = (time: string, channel: CommsChannel) => dayBookings.find(c => c.Release_Time === time && c.Channel === channel);
-  const slots = slotsForDate(gridDate);
-  // Any extra bookings that day not matching a fixed slot (e.g. extra Mail)
-  const extraBookings = dayBookings.filter(c => !slots.some(s => s.time === c.Release_Time && s.channel === c.Channel));
+  const step = (dir: number) => {
+    if (view === 'month') setGridDate(addMonths(gridDate.slice(0, 8) + '01', dir));
+    else setGridDate(addDays(gridDate, dir * 7));
+  };
+  const pickDay = (iso: string) => { setGridDate(iso); setView('week'); };
 
   return (
     <div className="space-y-4 animate-fade-in">
-      {/* Sub-tabs */}
+      {/* Top tabs: the slot calendar, and the weekly wallpaper/banner bands */}
       <div className="flex flex-wrap gap-1.5 border-b border-slate-200 pb-3">
         {([
-          ['day', 'Day view', Grid3x3],
-          ['agenda', 'Agenda', LayoutList],
+          ['calendar', 'Calendar', CalendarDays],
           ['weekly', 'Wallpaper & Banners', ImageIcon],
-          ['webinars', 'Webinars', Video],
-          ['report', 'Report', BarChart3],
         ] as const).map(([id, label, Icon]) => (
           <button key={id} onClick={() => setTab(id)}
             className={`py-1.5 px-3 rounded-lg text-sm font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
@@ -88,89 +103,48 @@ export default function CalendarPanel(props: CalendarPanelProps) {
         ))}
       </div>
 
-      {/* ---- DAY GRID ---- */}
-      {tab === 'day' && (
-        <div className="space-y-3">
+      {tab === 'weekly' ? (
+        <WeeklyPlacementsPanel placements={placements} onAdd={props.onAddPlacement} onEdit={props.onEditPlacement} onDelete={props.onDeletePlacement} />
+      ) : (
+        <>
+          {/* Toolbar: navigation + month/week toggle + book */}
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <button onClick={() => setGridDate(addDays(gridDate, -1))} className="p-2 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer"><ChevronLeft className="h-4 w-4" /></button>
-              <input type="date" value={gridDate} onChange={e => setGridDate(e.target.value)}
-                className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-semibold text-slate-800 outline-none" />
-              <button onClick={() => setGridDate(addDays(gridDate, 1))} className="p-2 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer"><ChevronRight className="h-4 w-4" /></button>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => step(-1)} className="p-2 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer"><ChevronLeft className="h-4 w-4" /></button>
+              <span className="text-sm font-bold text-slate-800 min-w-[150px] text-center">
+                {view === 'month' ? monthLabel(gridDate) : weekRangeLabel(gridDate)}
+              </span>
+              <button onClick={() => step(1)} className="p-2 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer"><ChevronRight className="h-4 w-4" /></button>
               <button onClick={() => setGridDate(todayISO())} className="px-3 py-1.5 text-sm font-semibold text-slate-500 hover:text-slate-800 cursor-pointer">Today</button>
             </div>
-            <span className="text-sm font-bold text-slate-700">{dateLabel(gridDate)}</span>
-          </div>
-
-          <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100 shadow-xs overflow-hidden">
-            {slots.map((s, i) => {
-              const b = bookingAt(s.time, s.channel);
-              return (
-                <div key={`${s.time}-${s.channel}-${i}`} className="flex items-center gap-3 px-4 py-2.5">
-                  <span className="flex items-center gap-1 text-xs font-mono text-slate-500 w-14 shrink-0"><Clock className="h-3 w-3" />{s.time}</span>
-                  <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded shrink-0 w-32 truncate">{s.channel}</span>
-                  {b ? (
-                    <button onClick={() => setDetailId(b.Comm_ID)} className="flex-1 min-w-0 flex items-center gap-2 text-left cursor-pointer group">
-                      {b.Blocked ? (
-                        <span className="text-sm text-slate-400 italic flex items-center gap-1"><Ban className="h-3.5 w-3.5" />Blocked</span>
-                      ) : (
-                        <>
-                          <span className="block font-semibold text-sm text-slate-800 truncate group-hover:text-slate-950">{b.Campaign_Name}</span>
-                          <span className={`px-2 py-0.5 rounded text-xs font-bold border whitespace-nowrap shrink-0 ${STATUS_STYLE[b.Status]}`}>{b.Status}</span>
-                        </>
-                      )}
-                    </button>
-                  ) : (
-                    <div className="flex-1 flex items-center gap-2">
-                      <button onClick={() => setShowBook({ channel: s.channel, time: s.time, date: gridDate })}
-                        className="text-sm font-semibold text-slate-400 hover:text-slate-900 flex items-center gap-1 cursor-pointer">
-                        <Plus className="h-3.5 w-3.5" />Book
-                      </button>
-                      <button onClick={() => setShowBook({ channel: s.channel, time: s.time, date: gridDate, block: true })}
-                        className="text-xs text-slate-300 hover:text-amber-600 flex items-center gap-1 cursor-pointer">
-                        <Ban className="h-3 w-3" />Block
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {extraBookings.map(b => (
-              <div key={b.Comm_ID} className="flex items-center gap-3 px-4 py-2.5 bg-slate-50/50">
-                <span className="flex items-center gap-1 text-xs font-mono text-slate-500 w-14 shrink-0"><Clock className="h-3 w-3" />{b.Release_Time}</span>
-                <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded shrink-0 w-32 truncate">{b.Channel}</span>
-                <button onClick={() => setDetailId(b.Comm_ID)} className="flex-1 min-w-0 flex items-center gap-2 text-left cursor-pointer">
-                  <span className="block font-semibold text-sm text-slate-800 truncate">{b.Campaign_Name}</span>
-                  <span className={`px-2 py-0.5 rounded text-xs font-bold border whitespace-nowrap shrink-0 ${STATUS_STYLE[b.Status]}`}>{b.Status}</span>
-                </button>
+            <div className="flex items-center gap-2">
+              <div className="flex bg-slate-100 border border-slate-200 rounded-lg p-0.5">
+                {([['month', 'Month', CalendarDays], ['week', 'Week', Grid3x3]] as const).map(([id, label, Icon]) => (
+                  <button key={id} onClick={() => setView(id)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1 cursor-pointer transition-all ${
+                      view === id ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                    }`}>
+                    <Icon className="h-3.5 w-3.5" />{label}
+                  </button>
+                ))}
               </div>
-            ))}
+              <button onClick={() => setShowBook({ date: gridDate })}
+                className="py-2 px-4 bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm rounded-lg flex items-center gap-2 cursor-pointer shrink-0">
+                <Plus className="h-4 w-4" />Book a slot
+              </button>
+            </div>
           </div>
-          <button onClick={() => setShowBook({ date: gridDate })}
-            className="text-sm font-semibold text-slate-500 hover:text-slate-900 flex items-center gap-1.5 cursor-pointer">
-            <Plus className="h-4 w-4" />Add another booking (any channel/time)
-          </button>
-        </div>
-      )}
 
-      {/* ---- AGENDA ---- */}
-      {tab === 'agenda' && (
-        <AgendaView communications={communications} statusFilter={statusFilter} setStatusFilter={setStatusFilter}
-          onOpen={setDetailId} onBook={() => setShowBook({ date: todayISO() })} shortDate={shortDate} />
-      )}
+          {view === 'month'
+            ? <MonthGrid anchor={gridDate} bookingsOn={bookingsOn} onOpen={setDetailId} onPickDay={pickDay} />
+            : <WeekGrid anchor={gridDate} bookingsOn={bookingsOn} bookingAt={bookingAt} onOpen={setDetailId} onBook={setShowBook} />}
 
-      {/* ---- WEEKLY PLACEMENTS ---- */}
-      {tab === 'weekly' && (
-        <WeeklyPlacementsPanel placements={placements} onAdd={props.onAddPlacement} onEdit={props.onEditPlacement} onDelete={props.onDeletePlacement} />
+          <p className="text-xs text-slate-400 flex items-center gap-1.5">
+            <CalendarRange className="h-3.5 w-3.5" />
+            Open slots are dashed — click one to book. Booked slots show the campaign and who booked it.
+          </p>
+        </>
       )}
-
-      {/* ---- WEBINARS ---- */}
-      {tab === 'webinars' && (
-        <WebinarsPanel webinars={webinars} onAdd={props.onAddWebinar} onDelete={props.onDeleteWebinar} />
-      )}
-
-      {/* ---- REPORT ---- */}
-      {tab === 'report' && <ReportView communications={communications} />}
 
       {/* Booking modal */}
       {showBook && (
@@ -188,107 +162,119 @@ export default function CalendarPanel(props: CalendarPanelProps) {
   );
 }
 
-// ---- Agenda view ----
-function AgendaView({ communications, statusFilter, setStatusFilter, onOpen, onBook, shortDate }: {
-  communications: Communication[]; statusFilter: string; setStatusFilter: (s: string) => void;
-  onOpen: (id: string) => void; onBook: () => void; shortDate: (iso: string) => string;
+// ---- Month grid: one uniform cell per day, booked items as chips ----
+function MonthGrid({ anchor, bookingsOn, onOpen, onPickDay }: {
+  anchor: string; bookingsOn: (iso: string) => Communication[];
+  onOpen: (id: string) => void; onPickDay: (iso: string) => void;
 }) {
-  const filtered = communications.filter(c => {
-    if (statusFilter === 'ALL') return true;
-    if (statusFilter === 'ACTIVE') return c.Status !== 'Cancelled' && c.Status !== 'Released';
-    return c.Status === statusFilter;
-  });
-  const byDate = new Map<string, Communication[]>();
-  filtered.slice().sort((a, b) => (a.Release_Date + a.Release_Time).localeCompare(b.Release_Date + b.Release_Time))
-    .forEach(c => { const arr = byDate.get(c.Release_Date) ?? []; arr.push(c); byDate.set(c.Release_Date, arr); });
+  const first = anchor.slice(0, 8) + '01';
+  const start = mondayOf(first);
+  const monthIdx = new Date(first + 'T00:00:00').getMonth();
+  const cells = Array.from({ length: 42 }, (_, i) => addDays(start, i));
+  const today = todayISO();
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-          className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 outline-none cursor-pointer">
-          <option value="ACTIVE">Active</option><option value="ALL">All</option>
-          <option value="Booked">Booked</option><option value="In Design">In design</option>
-          <option value="Ready">Ready</option><option value="Handed Off">Handed off</option>
-          <option value="Released">Released</option><option value="Cancelled">Cancelled</option>
-        </select>
-        <button onClick={onBook} className="py-2 px-4 bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm rounded-lg flex items-center gap-2 cursor-pointer">
-          <Plus className="h-4 w-4" />Book a slot
-        </button>
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+      <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50">
+        {WEEKDAY_LABELS.map(d => <div key={d} className="px-2 py-2 text-[11px] font-bold text-slate-500 text-center">{d}</div>)}
       </div>
-      {byDate.size === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-xl p-10 text-center text-slate-400 text-sm">Nothing here.</div>
-      ) : [...byDate.entries()].map(([date, items]) => (
-        <div key={date} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-          <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 text-sm font-bold text-slate-700">{shortDate(date)}</div>
-          <div className="divide-y divide-slate-100">
-            {items.map(c => (
-              <button key={c.Comm_ID} onClick={() => onOpen(c.Comm_ID)} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 text-left cursor-pointer">
-                <span className="flex items-center gap-1 text-xs font-mono text-slate-500 w-14 shrink-0"><Clock className="h-3 w-3" />{c.Release_Time}</span>
-                <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded shrink-0 w-32 truncate">{c.Channel}</span>
-                <span className="flex-1 min-w-0">
-                  <span className="block font-semibold text-sm text-slate-800 truncate">{c.Campaign_Name}</span>
-                  <span className="block text-xs text-slate-400 truncate">{c.Department || '—'} · {c.Subject_Line}</span>
-                </span>
-                <span className={`px-2 py-0.5 rounded text-xs font-bold border whitespace-nowrap shrink-0 ${STATUS_STYLE[c.Status]}`}>{c.Status}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      ))}
+      <div className="grid grid-cols-7">
+        {cells.map((iso, i) => {
+          const inMonth = new Date(iso + 'T00:00:00').getMonth() === monthIdx;
+          const items = bookingsOn(iso);
+          const isToday = iso === today;
+          return (
+            <button key={iso} onClick={() => onPickDay(iso)}
+              className={`min-h-[96px] border-b border-r border-slate-100 p-1.5 text-left align-top flex flex-col gap-1 cursor-pointer hover:bg-slate-50 transition-colors ${
+                inMonth ? '' : 'bg-slate-50/40'} ${(i + 1) % 7 === 0 ? 'border-r-0' : ''} ${i >= 35 ? 'border-b-0' : ''}`}>
+              <span className={`text-[11px] font-bold shrink-0 ${
+                isToday ? 'bg-slate-900 text-white rounded-full h-5 w-5 flex items-center justify-center' : inMonth ? 'text-slate-700' : 'text-slate-300'
+              }`}>{dayNum(iso)}</span>
+              <span className="flex flex-col gap-0.5 overflow-hidden w-full">
+                {items.slice(0, 3).map(c => (
+                  <span key={c.Comm_ID} onClick={(e) => { e.stopPropagation(); onOpen(c.Comm_ID); }}
+                    className={`truncate text-[10px] px-1 py-0.5 rounded border cursor-pointer ${STATUS_STYLE[c.Status]}`}
+                    title={`${c.Release_Time} ${c.Blocked ? 'Blocked' : c.Campaign_Name}`}>
+                    {c.Blocked ? '⛔ Blocked' : `${c.Release_Time} ${c.Campaign_Name}`}
+                  </span>
+                ))}
+                {items.length > 3 && <span className="text-[10px] text-slate-400 px-1">+{items.length - 3} more</span>}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-// ---- Report: channel × category ----
-function ReportView({ communications }: { communications: Communication[] }) {
-  const cats: CommCategory[] = [...COMM_CATEGORIES];
-  const rows = COMMS_CHANNELS.map(ch => {
-    const items = communications.filter(c => c.Channel === ch && c.Status !== 'Cancelled');
-    const counts = cats.map(cat => items.filter(c => c.Category === cat).length);
-    const uncat = items.filter(c => !c.Category).length;
-    return { ch, counts, uncat, total: items.length };
-  }).filter(r => r.total > 0);
-  const totalAll = rows.reduce((a, r) => a + r.total, 0);
+// ---- Week grid: 7 day-columns, each listing its fixed slots as uniform cells ----
+function WeekGrid({ anchor, bookingsOn, bookingAt, onOpen, onBook }: {
+  anchor: string; bookingsOn: (iso: string) => Communication[];
+  bookingAt: (iso: string, time: string, channel: CommsChannel) => Communication | undefined;
+  onOpen: (id: string) => void; onBook: (preset: BookingPreset) => void;
+}) {
+  const start = mondayOf(anchor);
+  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  const today = todayISO();
 
   return (
-    <div className="space-y-3 animate-fade-in">
-      <p className="text-sm text-slate-500 flex items-center gap-2"><BarChart3 className="h-4 w-4" />Campaigns by channel and priority (excludes cancelled).</p>
-      <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-xs">
-        <table className="w-full text-sm min-w-[560px]">
-          <thead>
-            <tr className="border-b border-slate-200 text-slate-500 bg-slate-50 text-xs uppercase">
-              <th className="p-3 text-left font-semibold">Channel</th>
-              {cats.map(c => <th key={c} className="p-3 text-center font-semibold">{c}</th>)}
-              <th className="p-3 text-center font-semibold">Uncategorised</th>
-              <th className="p-3 text-center font-semibold">Total</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 text-slate-700">
-            {rows.length === 0 ? (
-              <tr><td colSpan={cats.length + 3} className="p-6 text-center text-slate-400">No communications yet.</td></tr>
-            ) : rows.map(r => (
-              <tr key={r.ch} className="hover:bg-slate-50">
-                <td className="p-3 font-semibold text-slate-900">{r.ch}</td>
-                {r.counts.map((n, i) => <td key={i} className="p-3 text-center">{n || '—'}</td>)}
-                <td className="p-3 text-center text-slate-400">{r.uncat || '—'}</td>
-                <td className="p-3 text-center font-bold">{r.total}</td>
-              </tr>
-            ))}
-          </tbody>
-          {rows.length > 0 && (
-            <tfoot>
-              <tr className="border-t border-slate-200 bg-slate-50 font-bold text-slate-900">
-                <td className="p-3">Grand total</td>
-                {cats.map(cat => <td key={cat} className="p-3 text-center">{rows.reduce((a, r) => a + r.counts[cats.indexOf(cat)], 0)}</td>)}
-                <td className="p-3 text-center">{rows.reduce((a, r) => a + r.uncat, 0)}</td>
-                <td className="p-3 text-center">{totalAll}</td>
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
+    <div className="grid grid-cols-1 sm:grid-cols-7 gap-2">
+      {days.map(iso => {
+        const slots = slotsForDate(iso);
+        const dayBookings = bookingsOn(iso);
+        const extras = dayBookings.filter(c => !slots.some(s => s.time === c.Release_Time && s.channel === c.Channel));
+        const isToday = iso === today;
+        return (
+          <div key={iso} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs flex flex-col">
+            <div className={`px-2 py-1.5 text-center border-b border-slate-100 ${isToday ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-600'}`}>
+              <div className="text-[10px] font-semibold uppercase tracking-wide">{weekdayShort(iso)}</div>
+              <div className="text-sm font-bold">{dayNum(iso)}</div>
+            </div>
+            <div className="p-1.5 space-y-1.5 flex-1">
+              {slots.length === 0 && extras.length === 0 && (
+                <div className="text-[10px] text-slate-300 text-center py-3">No slots</div>
+              )}
+              {slots.map((s, i) => {
+                const b = bookingAt(iso, s.time, s.channel);
+                if (b) return <BookedCell key={`${s.time}-${s.channel}-${i}`} b={b} time={s.time} onOpen={onOpen} />;
+                return (
+                  <div key={`${s.time}-${s.channel}-${i}`} className="rounded-lg border border-dashed border-slate-200 px-1.5 py-1">
+                    <div className="text-[10px] font-mono text-slate-400">{s.time}</div>
+                    <div className="text-[10px] text-slate-500 truncate" title={s.channel}>{s.channel}</div>
+                    <div className="flex gap-2 mt-0.5">
+                      <button onClick={() => onBook({ channel: s.channel, time: s.time, date: iso })}
+                        className="text-[10px] font-bold text-slate-500 hover:text-slate-900 flex items-center gap-0.5 cursor-pointer"><Plus className="h-3 w-3" />Book</button>
+                      <button onClick={() => onBook({ channel: s.channel, time: s.time, date: iso, block: true })}
+                        className="text-[10px] text-slate-300 hover:text-amber-600 cursor-pointer">Block</button>
+                    </div>
+                  </div>
+                );
+              })}
+              {extras.map(b => <BookedCell key={b.Comm_ID} b={b} time={b.Release_Time} onOpen={onOpen} showChannel />)}
+            </div>
+          </div>
+        );
+      })}
     </div>
+  );
+}
+
+function BookedCell({ b, time, onOpen, showChannel }: { b: Communication; time: string; onOpen: (id: string) => void; showChannel?: boolean }) {
+  return (
+    <button onClick={() => onOpen(b.Comm_ID)}
+      className={`w-full text-left rounded-lg border px-1.5 py-1 cursor-pointer hover:brightness-95 transition-all ${STATUS_STYLE[b.Status]}`}
+      title={`${b.Channel} · ${time}${b.Blocked ? '' : ' · ' + b.Campaign_Name}`}>
+      <div className="text-[10px] font-mono opacity-70">{time}</div>
+      {b.Blocked ? (
+        <div className="text-[11px] font-semibold italic flex items-center gap-0.5"><Ban className="h-3 w-3" />Blocked</div>
+      ) : (
+        <>
+          <div className="text-[11px] font-bold truncate leading-tight">{b.Campaign_Name}</div>
+          <div className="text-[9px] opacity-70 truncate">{showChannel ? `${b.Channel} · ` : ''}{firstName(b.Comms_SPOC)}</div>
+        </>
+      )}
+    </button>
   );
 }
 
@@ -491,7 +477,7 @@ function CommDetail({ comm, vendors, tasks, onClose, onCancel, onCreateTask, onM
               <div><span className="text-xs text-slate-400 block">Languages</span>{comm.Languages?.join(', ') || '—'}</div>
               {comm.Sub_Type && <div><span className="text-xs text-slate-400 block">Type</span>{comm.Sub_Type}</div>}
               <div><span className="text-xs text-slate-400 block">Business SPOC</span>{comm.Business_SPOC || '—'}</div>
-              <div><span className="text-xs text-slate-400 block">Comms SPOC</span>{comm.Comms_SPOC}</div>
+              <div><span className="text-xs text-slate-400 block">Booked by</span>{comm.Comms_SPOC}</div>
               {comm.Sender_ID && <div><span className="text-xs text-slate-400 block">Sender ID</span>{comm.Sender_ID}</div>}
             </div>
           )}
@@ -531,7 +517,7 @@ function CommDetail({ comm, vendors, tasks, onClose, onCancel, onCreateTask, onM
 
               {comm.Status === 'Ready' && (
                 <div className="bg-violet-50 border border-violet-200 rounded-lg p-3 space-y-2">
-                  <div className="text-xs font-bold text-violet-900 flex items-center gap-1.5"><Send className="h-4 w-4" />Hand off to the release SPOC</div>
+                  <div className="text-xs font-bold text-violet-900 flex items-center gap-1.5"><Send className="h-4 w-4" />Hand off for release</div>
                   <div className="grid grid-cols-2 gap-2">
                     <input type="text" value={senderId} onChange={e => setSenderId(e.target.value)} placeholder="Sender ID" className="bg-white border border-violet-200 rounded px-2 py-1.5 text-sm outline-none" />
                     <input type="text" value={creativeLink} onChange={e => setCreativeLink(e.target.value)} placeholder="Creative link" className="bg-white border border-violet-200 rounded px-2 py-1.5 text-sm outline-none" />
@@ -540,14 +526,14 @@ function CommDetail({ comm, vendors, tasks, onClose, onCancel, onCreateTask, onM
                   </div>
                   <button disabled={busy} onClick={() => run(() => onHandoff(comm.Comm_ID, { Sender_ID: senderId, Creative_Link: creativeLink, CTA_Text: ctaText, CTA_Link: ctaLink }).then(ok => { if (ok) onClose(); return ok; }))}
                     className="w-full py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50">
-                    <Send className="h-4 w-4" />Send to release SPOC
+                    <Send className="h-4 w-4" />Send for release
                   </button>
                 </div>
               )}
             </div>
           )}
 
-          {comm.Status === 'Handed Off' && <div className="bg-violet-50 border border-violet-200 rounded-lg p-3 text-sm text-violet-800">📤 Handed off — waiting for release.</div>}
+          {comm.Status === 'Handed Off' && <div className="bg-violet-50 border border-violet-200 rounded-lg p-3 text-sm text-violet-800">📤 Handed off — waiting for release. Mark it released from the Release Request screen.</div>}
           {comm.Status === 'Released' && <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-800">✅ Released{comm.Released_By ? ` by ${comm.Released_By}` : ''}.</div>}
 
           {comm.Status !== 'Released' && comm.Status !== 'Cancelled' && (

@@ -562,13 +562,20 @@ describe('calendar & release pipeline', () => {
     const spocView = await s.api(RELEASE_SPOC, 'GET', '/api/db');
     assert.ok(spocView.json.communications.every((c: any) => c.Status === 'Handed Off' || c.Status === 'Released'));
 
-    // IC cannot release; SPOC can
-    const icRelease = await s.api(ADMIN, 'POST', `/api/communications/${id}/release`);
-    assert.equal(icRelease.status, 403);
+    // Both the IC team and the SPOC can release; the SPOC does it here
     const released = await s.api(RELEASE_SPOC, 'POST', `/api/communications/${id}/release`);
     assert.equal(released.status, 200);
     assert.equal(released.json.communication.Status, 'Released');
     assert.equal(released.json.communication.Released_By, 'Ravi Menon');
+  });
+
+  it('lets the IC team mark a handed-off communication released', async () => {
+    const booked = await s.api(ADMIN, 'POST', '/api/communications', booking({ Release_Time: '17:00' }));
+    const id = booked.json.communication.Comm_ID;
+    await s.api(ADMIN, 'POST', `/api/communications/${id}/handoff`, {});
+    const released = await s.api(ADMIN, 'POST', `/api/communications/${id}/release`);
+    assert.equal(released.status, 200);
+    assert.equal(released.json.communication.Status, 'Released');
   });
 
   it('auto-advances a booking to Ready when its linked creative is approved', async () => {

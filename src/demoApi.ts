@@ -695,7 +695,7 @@ export async function demoFetch(input: string, init?: RequestInit): Promise<Resp
     }
 
     if (action === 'release') {
-      if (user.Role !== 'Release') return json(403, { error: 'Only the release SPOC can mark a communication as released.' });
+      if (user.Role !== 'Release' && user.Role !== 'Internal') return json(403, { error: 'Only the IC team or release SPOC can mark a communication as released.' });
       if (comm.Status !== 'Handed Off') return json(400, { error: 'Only handed-off communications can be released.' });
       comm.Status = 'Released';
       comm.Released_At = new Date().toISOString();

@@ -4,8 +4,7 @@ import GlassTile from './GlassTile';
 import TaskDetailModal from './TaskDetailModal';
 import VendorsPanel from './VendorsPanel';
 import HistoryPanel from './HistoryPanel';
-import CalendarPanel from './CalendarPanel';
-import { Plus, Filter, Clock, CheckCircle, AlertTriangle, User, Layers, ArrowRight, ExternalLink, FileCode, Check, X, Search, LayoutGrid, Users, Archive, Sparkles, CalendarDays } from 'lucide-react';
+import { Plus, Filter, Clock, AlertTriangle, User, Layers, ExternalLink, FileCode, Check, X, Search, LayoutGrid, Users, Archive, Sparkles } from 'lucide-react';
 
 // Asset types grouped by category for the dropdowns
 const ASSET_GROUPS = (['Internal Comms', 'Social Media', 'Offline & Print'] as const).map(cat => ({
@@ -22,7 +21,7 @@ export interface BriefDraft {
   due_date: string;
 }
 
-interface InternalDashboardProps {
+interface VendorDashboardProps {
   dbState: DatabaseState;
   onAddTask: (taskData: {
     Title: string;
@@ -42,20 +41,9 @@ interface InternalDashboardProps {
   onAddVendor: (fields: Record<string, string>) => Promise<boolean>;
   onEditVendor: (vendorId: string, fields: Record<string, string>) => Promise<boolean>;
   onOrganizeBrief: (rawText: string) => Promise<BriefDraft | null>;
-  onBookSlot: (fields: Record<string, unknown>) => Promise<boolean>;
-  onEditBooking: (id: string, fields: Record<string, unknown>) => Promise<boolean>;
-  onCancelBooking: (id: string) => Promise<boolean>;
-  onCreateDesignTask: (id: string, vendorId: string) => Promise<boolean>;
-  onMarkReady: (id: string, creativeLink?: string) => Promise<boolean>;
-  onHandoff: (id: string, fields: Record<string, unknown>) => Promise<boolean>;
-  onAddPlacement: (fields: Record<string, unknown>) => Promise<boolean>;
-  onEditPlacement: (id: string, fields: Record<string, unknown>) => Promise<boolean>;
-  onDeletePlacement: (id: string) => Promise<boolean>;
-  onAddWebinar: (fields: Record<string, unknown>) => Promise<boolean>;
-  onDeleteWebinar: (id: string) => Promise<boolean>;
 }
 
-export default function InternalDashboard({
+export default function VendorDashboard({
   dbState,
   onAddTask,
   onReviewDeliverable,
@@ -67,25 +55,14 @@ export default function InternalDashboard({
   onAddVendor,
   onEditVendor,
   onOrganizeBrief,
-  onBookSlot,
-  onEditBooking,
-  onCancelBooking,
-  onCreateDesignTask,
-  onMarkReady,
-  onHandoff,
-  onAddPlacement,
-  onEditPlacement,
-  onDeletePlacement,
-  onAddWebinar,
-  onDeleteWebinar,
-}: InternalDashboardProps) {
-  const { tasks = [], vendors = [], deliverables = [], users = [], communications = [], placements = [], webinars = [] } = dbState;
+}: VendorDashboardProps) {
+  const { tasks = [], vendors = [], deliverables = [], users = [] } = dbState;
 
   // Cancelled requests stay in the database (History) but leave the board
   const activeTasks = tasks.filter(t => t.Status !== 'Cancelled');
 
-  // Calendar / board / vendors / history view
-  const [view, setView] = useState<'calendar' | 'board' | 'vendors' | 'history'>('calendar');
+  // Board / vendors / history view
+  const [view, setView] = useState<'board' | 'vendors' | 'history'>('board');
   const [historyVendorId, setHistoryVendorId] = useState<string | null>(null);
 
   // AI brief organizer state (inside the create form)
@@ -244,17 +221,8 @@ export default function InternalDashboard({
   return (
     <div id="internal-dashboard" className="space-y-6 animate-fade-in">
 
-      {/* Calendar / Board / Vendors / History view toggle */}
+      {/* Board / Vendors / History view toggle */}
       <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => setView('calendar')}
-          className={`py-2 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all cursor-pointer ${
-            view === 'calendar' ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:text-slate-900'
-          }`}
-        >
-          <CalendarDays className="h-4 w-4" />
-          Calendar
-        </button>
         <button
           onClick={() => setView('board')}
           className={`py-2 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all cursor-pointer ${
@@ -284,27 +252,7 @@ export default function InternalDashboard({
         </button>
       </div>
 
-      {view === 'calendar' ? (
-        <CalendarPanel
-          communications={communications}
-          placements={placements}
-          webinars={webinars}
-          vendors={vendors}
-          tasks={tasks}
-          onBook={onBookSlot}
-          onEdit={onEditBooking}
-          onCancel={onCancelBooking}
-          onCreateTask={onCreateDesignTask}
-          onMarkReady={onMarkReady}
-          onHandoff={onHandoff}
-          onOpenTask={(taskId) => { setView('board'); setDetailTaskId(taskId); }}
-          onAddPlacement={onAddPlacement}
-          onEditPlacement={onEditPlacement}
-          onDeletePlacement={onDeletePlacement}
-          onAddWebinar={onAddWebinar}
-          onDeleteWebinar={onDeleteWebinar}
-        />
-      ) : view === 'vendors' ? (
+      {view === 'vendors' ? (
         <VendorsPanel
           vendors={vendors}
           users={users}
