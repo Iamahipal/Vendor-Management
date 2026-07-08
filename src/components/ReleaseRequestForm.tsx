@@ -1,7 +1,7 @@
 import { useState, FormEvent } from 'react';
 import {
   Communication, CommsChannel, COMMS_CHANNELS, CHANNEL_RULES, CHANNEL_ASSET_TYPE,
-  AUDIENCES, COMM_CATEGORIES, COMM_LANGUAGES, CommCategory, STANDARD_RELEASE_TIMES,
+  AUDIENCES, COMM_CATEGORIES, COMM_LANGUAGES, CommCategory, STANDARD_RELEASE_TIMES, IC_SPOCS,
 } from '../types';
 import { ClipboardList, Rocket, Clock, CheckCircle2, History, Download } from 'lucide-react';
 
@@ -62,6 +62,7 @@ export default function ReleaseRequestForm({ communications, onSubmit, onRelease
   const [subject, setSubject] = useState('');
   const [department, setDepartment] = useState('');
   const [businessSpoc, setBusinessSpoc] = useState('');
+  const [commsSpoc, setCommsSpoc] = useState<string>(IC_SPOCS[0]);
   const [audience, setAudience] = useState<string>('All Employees');
   const [languages, setLanguages] = useState<string[]>(['English']);
   const [category, setCategory] = useState<CommCategory | ''>('');
@@ -77,7 +78,7 @@ export default function ReleaseRequestForm({ communications, onSubmit, onRelease
 
   const reset = () => {
     setCampaign(''); setSubject(''); setDepartment(''); setBusinessSpoc('');
-    setAudience('All Employees'); setLanguages(['English']); setCategory('');
+    setAudience('All Employees'); setLanguages(['English']); setCategory(''); setCommsSpoc(IC_SPOCS[0]);
     setCreativeLink(''); setSenderId(''); setCtaText(''); setCtaLink('');
   };
 
@@ -86,7 +87,8 @@ export default function ReleaseRequestForm({ communications, onSubmit, onRelease
     setBusy(true);
     const ok = await onSubmit({
       Channel: channel, Release_Date: date, Release_Time: time,
-      Campaign_Name: campaign, Subject_Line: subject, Department: department, Business_SPOC: businessSpoc,
+      Campaign_Name: campaign, Subject_Line: subject, Department: department,
+      Comms_SPOC: commsSpoc, Business_SPOC: businessSpoc,
       Audience: audience, Languages: languages, Category: category || undefined,
       Creative_Link: creativeLink || undefined, Sender_ID: senderId || undefined,
       CTA_Text: ctaText || undefined, CTA_Link: ctaLink || undefined,
@@ -194,8 +196,13 @@ export default function ReleaseRequestForm({ communications, onSubmit, onRelease
 
         {/* 3. Requesting team */}
         <fieldset className="space-y-3 border-t border-slate-100 pt-4">
-          <legend className="text-xs font-bold uppercase tracking-wide text-slate-400">3 · Requesting team</legend>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <legend className="text-xs font-bold uppercase tracking-wide text-slate-400">3 · Owners & requesting team</legend>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <label className={label}>Comms SPOC (owner)</label>
+              <input list="ic-spocs-rr" value={commsSpoc} onChange={e => setCommsSpoc(e.target.value)} className={input} />
+              <datalist id="ic-spocs-rr">{IC_SPOCS.map(s => <option key={s} value={s} />)}</datalist>
+            </div>
             <div className="space-y-1">
               <label className={label}>Requesting team</label>
               <input type="text" value={department} onChange={e => setDepartment(e.target.value)} placeholder="e.g., HR, L&D" className={input} />

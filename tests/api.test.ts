@@ -505,6 +505,25 @@ describe('history & metrics foundations', () => {
 });
 
 // ---------------------------------------------------------------
+// AI booking parser (no providers configured)
+// ---------------------------------------------------------------
+describe('AI booking parser', () => {
+  let s: TestServer;
+  before(async () => { s = await startServer(); });
+  after(async () => { await s.stop(); });
+
+  it('is internal-only, needs real text, and degrades gracefully with no keys', async () => {
+    const vendor = await s.api(PIXEL_VENDOR, 'POST', '/api/ai/parse-booking', { rawText: 'we need an emailer tomorrow for HR' });
+    assert.equal(vendor.status, 403);
+    const short = await s.api(ADMIN, 'POST', '/api/ai/parse-booking', { rawText: 'hi' });
+    assert.equal(short.status, 400);
+    // no AI keys configured → 502, never a crash
+    const noAi = await s.api(ADMIN, 'POST', '/api/ai/parse-booking', { rawText: 'Please send a Mail emailer on 2099-10-20 at 10:00 for HR to all employees.' });
+    assert.equal(noAi.status, 502);
+  });
+});
+
+// ---------------------------------------------------------------
 // Calendar booking & release pipeline
 // ---------------------------------------------------------------
 describe('calendar & release pipeline', () => {
@@ -639,6 +658,11 @@ describe('richer calendar bookings', () => {
   it('rejects an audience outside the allowed set', async () => {
     const { status } = await s.api(ADMIN, 'POST', '/api/communications', booking({ Release_Time: '11:00', Audience: 'Everyone Everywhere' }));
     assert.equal(status, 400);
+  });
+
+  it('stores the chosen Comms SPOC on the booking', async () => {
+    const { json } = await s.api(ADMIN, 'POST', '/api/communications', booking({ Release_Time: '17:00', Comms_SPOC: 'Niharika Srivastava' }));
+    assert.equal(json.communication.Comms_SPOC, 'Niharika Srivastava');
   });
 
   it('defaults Languages to English when none supplied', async () => {

@@ -455,6 +455,11 @@ export async function demoFetch(input: string, init?: RequestInit): Promise<Resp
     return json(502, { error: 'AI brief organizer is offline in this static demo (it needs private API keys). Run the app locally to use it — or fill the form manually.' });
   }
 
+  // POST /api/ai/parse-booking — needs private AI keys, unavailable in demo
+  if (method === 'POST' && path === '/api/ai/parse-booking') {
+    return json(502, { error: 'AI booking parser is offline in this static demo (it needs private API keys). Run the server build with a key to use it — or fill the card manually.' });
+  }
+
   // POST /api/vendors — add vendor + contact login (internal only)
   if (method === 'POST' && path === '/api/vendors') {
     if (user.Role !== 'Internal') return json(403, { error: 'RLS Reject: Only internal staff can manage vendors.' });

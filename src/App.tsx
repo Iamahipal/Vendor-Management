@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { DatabaseState, User, TaskStatus, AssetType } from './types';
+import { DatabaseState, User, TaskStatus, AssetType, BookingDraft } from './types';
 import { DEMO_MODE, demoFetch, resetDemoDb } from './demoApi';
 import VendorDashboard from './components/VendorDashboard';
 import HomeScreen, { HomeView } from './components/HomeScreen';
@@ -356,6 +356,12 @@ export default function App() {
   const handleRelease = (id: string) =>
     commAction(`/api/communications/${id}/release`, 'POST', undefined, 'could not mark released.').then(d => !!d);
 
+  // AI: parse a pasted email into a booking draft (server build + key only)
+  const handleParseBooking = async (rawText: string): Promise<BookingDraft | null> => {
+    const res = await commAction('/api/ai/parse-booking', 'POST', { rawText }, 'AI could not read the email — fill the card manually.');
+    return (res?.draft as BookingDraft) ?? null;
+  };
+
   // Release Request form: book the slot then immediately hand it off for release
   const handleCreateReleaseRequest = async (fields: Record<string, unknown>) => {
     const booked = await commAction('/api/communications', 'POST', fields, 'could not save the release request.');
@@ -561,6 +567,7 @@ export default function App() {
             onMarkReady={handleMarkReady}
             onHandoff={handleHandoff}
             onOpenTask={() => setView('vendor')}
+            onParseBooking={handleParseBooking}
             onAddPlacement={handleAddPlacement}
             onEditPlacement={handleEditPlacement}
             onDeletePlacement={handleDeletePlacement}

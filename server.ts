@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
-import { ASSET_TEMPLATES, DatabaseState, Task, Deliverable, User, Vendor, NotificationLog, TaskStatus, AssetType, Communication, COMMS_CHANNELS, CHANNEL_ASSET_TYPE, INHOUSE_VENDOR_ID, AUDIENCES, WeeklyPlacement, PLACEMENT_SURFACES, Webinar } from './src/types';
+import { ASSET_TEMPLATES, DatabaseState, Task, Deliverable, User, Vendor, NotificationLog, TaskStatus, AssetType, Communication, COMMS_CHANNELS, CHANNEL_ASSET_TYPE, INHOUSE_VENDOR_ID, AUDIENCES, COMM_LANGUAGES, COMM_CATEGORIES, STANDARD_RELEASE_TIMES, WeeklyPlacement, PLACEMENT_SURFACES, Webinar } from './src/types';
 import { DEFAULT_DB } from './src/seed';
 
 const app = express();
@@ -1600,6 +1600,77 @@ Return ONLY a JSON object (no markdown fences, no commentary) with exactly these
   } catch (error) {
     console.error('Brief organizer failed:', error);
     res.status(502).json({ error: 'AI could not organize this text right now — please fill the form manually or try again.' });
+  }
+});
+
+// Parse a raw email/message into a booking draft (Internal only). Reuses the
+// same provider failover; strictly extracts, never invents.
+app.post('/api/ai/parse-booking', getSecurityContext, async (req, res) => {
+  const user = (req as AuthedRequest).user;
+  if (user.Role !== 'Internal') {
+    return res.status(403).json({ error: 'RLS Reject: Only internal staff can use the booking parser.' });
+  }
+  const { rawText } = (req.body ?? {}) as { rawText?: string };
+  if (typeof rawText !== 'string' || rawText.trim().length < 10) {
+    return res.status(400).json({ error: 'Please paste the email/message first (at least a sentence).' });
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const prompt = `You extract internal-communication booking details from a raw email or chat message for an IC team.
+
+STRICT RULES:
+- Only extract facts that are actually present. If a field is not stated, use an empty string (or [] for languages). Never invent or guess.
+- Today's date is ${today}. Resolve relative dates ("next Friday", "20th") to an absolute YYYY-MM-DD only if the text clearly implies one; otherwise leave empty.
+
+RAW MESSAGE (verbatim):
+"""
+${rawText.trim().slice(0, 4000)}
+"""
+
+Return ONLY a JSON object (no markdown, no commentary) with exactly these keys:
+{
+  "channel": "one of exactly: ${COMMS_CHANNELS.join(', ')} — or empty string",
+  "campaign_name": "short campaign/theme name",
+  "subject_line": "the subject line if any",
+  "department": "requesting team/department",
+  "business_spoc": "the requester's name if stated",
+  "audience": "one of exactly: ${AUDIENCES.join(', ')} — or empty string",
+  "languages": ["subset of: ${COMM_LANGUAGES.join(', ')}"],
+  "release_date": "YYYY-MM-DD or empty string",
+  "release_time": "one of exactly: ${STANDARD_RELEASE_TIMES.join(', ')} — or HH:MM if a specific other time is stated, else empty string",
+  "priority": "one of exactly: ${COMM_CATEGORIES.join(', ')} — or empty string"
+}`;
+
+  try {
+    const { text, provider } = await generateWithFallback(prompt);
+    const jsonText = text.replace(/^```(?:json)?/m, '').replace(/```\s*$/m, '').trim();
+    const start = jsonText.indexOf('{');
+    const end = jsonText.lastIndexOf('}');
+    if (start === -1 || end === -1) throw new Error('AI did not return structured data.');
+    const parsed = JSON.parse(jsonText.slice(start, end + 1)) as Record<string, unknown>;
+
+    const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+    const pick = <T extends string>(v: unknown, allowed: readonly T[]) => (allowed as readonly string[]).includes(str(v)) ? (str(v) as T) : '';
+    const langs = Array.isArray(parsed.languages)
+      ? parsed.languages.map(str).filter(l => (COMM_LANGUAGES as string[]).includes(l))
+      : [];
+    const rawTime = str(parsed.release_time);
+    const draft = {
+      channel: pick(parsed.channel, COMMS_CHANNELS),
+      campaign_name: str(parsed.campaign_name),
+      subject_line: str(parsed.subject_line),
+      department: str(parsed.department),
+      business_spoc: str(parsed.business_spoc),
+      audience: pick(parsed.audience, AUDIENCES),
+      languages: langs,
+      release_date: /^\d{4}-\d{2}-\d{2}$/.test(str(parsed.release_date)) ? str(parsed.release_date) : '',
+      release_time: /^\d{2}:\d{2}$/.test(rawTime) ? rawTime : '',
+      priority: pick(parsed.priority, COMM_CATEGORIES),
+    };
+    res.json({ draft, provider: provider.label });
+  } catch (error) {
+    console.error('Booking parser failed:', error);
+    res.status(502).json({ error: 'AI could not read this text right now — please fill the card manually or try again.' });
   }
 });
 

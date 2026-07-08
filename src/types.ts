@@ -205,9 +205,42 @@ export type CommStatus = 'Booked' | 'In Design' | 'Ready' | 'Handed Off' | 'Rele
 export type Audience = 'All Employees' | 'Targeted';
 export const AUDIENCES: Audience[] = ['All Employees', 'Targeted'];
 
+// The IC team's Comms SPOCs (slot owners). Booking picks one; the calendar
+// colour-codes slots by SPOC. Free-text "Other" is also allowed on the form.
+export const IC_SPOCS = ['Sarah Jenkins', 'Niharika Srivastava', 'Naythan Vaz', 'Tushangi Rastogi', 'Monika Mishra'];
+
+// A stable, light-mode palette; each SPOC hashes to one entry so their colour
+// is consistent everywhere (month cells, week cells, legend).
+export interface SpocColor { bg: string; text: string; border: string; dot: string; }
+export const SPOC_PALETTE: SpocColor[] = [
+  { bg: 'bg-blue-50',    text: 'text-blue-800',    border: 'border-blue-200',    dot: 'bg-blue-500' },
+  { bg: 'bg-emerald-50', text: 'text-emerald-800', border: 'border-emerald-200', dot: 'bg-emerald-500' },
+  { bg: 'bg-violet-50',  text: 'text-violet-800',  border: 'border-violet-200',  dot: 'bg-violet-500' },
+  { bg: 'bg-amber-50',   text: 'text-amber-800',   border: 'border-amber-200',   dot: 'bg-amber-500' },
+  { bg: 'bg-rose-50',    text: 'text-rose-800',    border: 'border-rose-200',    dot: 'bg-rose-500' },
+  { bg: 'bg-cyan-50',    text: 'text-cyan-800',    border: 'border-cyan-200',    dot: 'bg-cyan-500' },
+  { bg: 'bg-fuchsia-50', text: 'text-fuchsia-800', border: 'border-fuchsia-200', dot: 'bg-fuchsia-500' },
+  { bg: 'bg-teal-50',    text: 'text-teal-800',    border: 'border-teal-200',    dot: 'bg-teal-500' },
+];
+const SPOC_NEUTRAL: SpocColor = { bg: 'bg-slate-50', text: 'text-slate-500', border: 'border-slate-200', dot: 'bg-slate-300' };
+
+export function spocColor(name?: string): SpocColor {
+  if (!name) return SPOC_NEUTRAL;
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return SPOC_PALETTE[h % SPOC_PALETTE.length];
+}
+
 // Sub-type of a mail-style communication (the "Mailer/Bulletin" column)
 export type CommSubType = 'Mailer' | 'Bulletin' | 'Notification' | 'Mail';
 export const COMM_SUBTYPES: CommSubType[] = ['Mailer', 'Bulletin', 'Notification', 'Mail'];
+
+// Shape returned by POST /api/ai/parse-booking (email → booking draft)
+export interface BookingDraft {
+  channel: string; campaign_name: string; subject_line: string; department: string;
+  business_spoc: string; audience: string; languages: string[];
+  release_date: string; release_time: string; priority: string;
+}
 
 // Campaign priority category (Sheet2)
 export type CommCategory = 'Critical' | 'Important' | 'General';
