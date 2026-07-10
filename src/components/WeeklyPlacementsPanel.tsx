@@ -1,5 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { WeeklyPlacement, PlacementSurface, PLACEMENT_SURFACES } from '../types';
+import { Select } from './Field';
 import { Plus, X, Trash2, ImageIcon, Pencil } from 'lucide-react';
 
 interface Props {
@@ -118,10 +119,8 @@ export default function WeeklyPlacementsPanel({ placements, onAdd, onEdit, onDel
             </div>
             <div className="space-y-1">
               <label className="text-slate-600 text-xs font-semibold">Status</label>
-              <select value={form.Status || 'Planned'} onChange={e => set('Status', e.target.value)}
-                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none cursor-pointer">
-                <option>Planned</option><option>Blocked</option><option>Live</option>
-              </select>
+              <Select value={form.Status || 'Planned'} onChange={v => set('Status', v)}
+                options={['Planned', 'Blocked', 'Live'].map(s => ({ value: s, label: s }))} />
             </div>
           </div>
           <div className="flex gap-2 justify-end">

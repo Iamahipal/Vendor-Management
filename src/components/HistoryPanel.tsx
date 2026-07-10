@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Task, Vendor, Deliverable } from '../types';
+import { Select } from './Field';
 import { Search, X, Archive } from 'lucide-react';
 
 interface HistoryPanelProps {
@@ -66,18 +67,10 @@ export default function HistoryPanel({ tasks, vendors, deliverables, initialVend
             </button>
           )}
         </div>
-        <select value={vendorFilter} onChange={e => setVendorFilter(e.target.value)}
-          className="bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg text-sm font-semibold text-slate-700 outline-none cursor-pointer">
-          <option value="ALL">All vendors</option>
-          {vendors.map(v => <option key={v.Vendor_ID} value={v.Vendor_ID}>{v.Company_Name}</option>)}
-        </select>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-          className="bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg text-sm font-semibold text-slate-700 outline-none cursor-pointer">
-          <option value="ALL">All statuses</option>
-          {['Approved', 'Cancelled', 'Delivered', 'Needs Revision', 'In Progress', 'Assigned'].map(s => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
+        <div className="w-40"><Select value={vendorFilter} onChange={setVendorFilter}
+          options={[{ value: 'ALL', label: 'All vendors' }, ...vendors.map(v => ({ value: v.Vendor_ID, label: v.Company_Name }))]} /></div>
+        <div className="w-40"><Select value={statusFilter} onChange={setStatusFilter}
+          options={[{ value: 'ALL', label: 'All statuses' }, ...['Approved', 'Cancelled', 'Delivered', 'Needs Revision', 'In Progress', 'Assigned'].map(s => ({ value: s, label: s }))]} /></div>
         <span className="text-xs text-slate-400 ml-auto">{rows.length} request{rows.length === 1 ? '' : 's'}</span>
       </div>
 

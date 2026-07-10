@@ -8,6 +8,7 @@ import {
 import WeeklyPlacementsPanel from './WeeklyPlacementsPanel';
 import Modal from './Modal';
 import { Select, fieldBase } from './Field';
+import { CHANNEL_OPTIONS, channelIcon } from './channelIcons';
 import {
   CalendarDays, Plus, Clock, Building2, Palette, Send, CheckCircle2, Trash2,
   ChevronLeft, ChevronRight, Ban, ImageIcon, AlertTriangle, Grid3x3, CalendarRange,
@@ -430,9 +431,7 @@ function BookingForm({ preset, onClose, onBook, onParse }: {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="space-y-1">
               <label className="text-slate-600 text-xs font-semibold">Channel *</label>
-              <Select value={channel} onChange={e => setChannel(e.target.value as CommsChannel)}>
-                {COMMS_CHANNELS.map(c => <option key={c} value={c}>{c}</option>)}
-              </Select>
+              <Select value={channel} onChange={v => setChannel(v as CommsChannel)} options={CHANNEL_OPTIONS} />
               <p className="text-[11px] text-slate-400">{rule.frequency}{CHANNEL_ASSET_TYPE[channel] ? ' · needs a creative' : ''}</p>
             </div>
             <div className="space-y-1">
@@ -444,10 +443,8 @@ function BookingForm({ preset, onClose, onBook, onParse }: {
               {specialTime ? (
                 <input type="text" required value={time} onChange={e => setTime(e.target.value)} placeholder="HH:MM" className={inp} />
               ) : (
-                <Select value={time} onChange={e => { if (e.target.value === '__special') setSpecialTime(true); else setTime(e.target.value); }}>
-                  {SLOT4.map(t => <option key={t} value={t}>{t}</option>)}
-                  <option value="__special">Special time…</option>
-                </Select>
+                <Select value={time} onChange={v => { if (v === '__special') setSpecialTime(true); else setTime(v); }}
+                  options={[...SLOT4.map(t => ({ value: t, label: t })), { value: '__special', label: 'Special time…' }]} />
               )}
               {specialTime && <button type="button" onClick={() => { setSpecialTime(false); setTime('10:00'); }} className="text-[11px] text-slate-400 hover:text-slate-600 cursor-pointer">← standard slots</button>}
             </div>
@@ -486,16 +483,12 @@ function BookingForm({ preset, onClose, onBook, onParse }: {
                 </div>
                 <div className="space-y-1">
                   <label className="text-slate-600 text-xs font-semibold">Priority</label>
-                  <Select value={category} onChange={e => setCategory(e.target.value as CommCategory)}>
-                    <option value="">—</option>
-                    {COMM_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </Select>
+                  <Select value={category} onChange={v => setCategory(v as CommCategory)}
+                    options={[{ value: '', label: '—' }, ...COMM_CATEGORIES.map(c => ({ value: c, label: c }))]} />
                 </div>
                 <div className="space-y-1">
                   <label className="text-slate-600 text-xs font-semibold">Audience</label>
-                  <Select value={audience} onChange={e => setAudience(e.target.value)}>
-                    {AUDIENCES.map(a => <option key={a} value={a}>{a}</option>)}
-                  </Select>
+                  <Select value={audience} onChange={setAudience} options={AUDIENCES.map(a => ({ value: a, label: a }))} />
                 </div>
               </div>
               <div className="space-y-1">
@@ -548,7 +541,7 @@ function CommDetail({ comm, vendors, tasks, onClose, onCancel, onCreateTask, onM
           {/* Status / meta row */}
           <div className="space-y-2">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded">{comm.Channel}</span>
+              <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded inline-flex items-center gap-1 [&_svg]:h-3.5 [&_svg]:w-3.5">{channelIcon(comm.Channel)}{comm.Channel}</span>
               <span className={`px-2 py-0.5 rounded text-xs font-bold border ${STATUS_STYLE[comm.Status]}`}>{comm.Status}</span>
               {comm.Category && <span className="text-xs font-bold text-rose-600">{comm.Category}</span>}
             </div>
@@ -582,9 +575,8 @@ function CommDetail({ comm, vendors, tasks, onClose, onCancel, onCreateTask, onM
                 <div className="bg-violet-50 border border-violet-200 rounded-lg p-3 space-y-2">
                   <div className="text-xs font-bold text-violet-900 flex items-center gap-1.5"><Palette className="h-4 w-4" />This channel needs a creative — brief a vendor:</div>
                   <div className="flex gap-2">
-                    <div className="flex-1"><Select value={vendorId} onChange={e => setVendorId(e.target.value)}>
-                      {vendors.map(v => <option key={v.Vendor_ID} value={v.Vendor_ID}>{v.Company_Name}</option>)}
-                    </Select></div>
+                    <div className="flex-1"><Select value={vendorId} onChange={setVendorId}
+                      options={vendors.map(v => ({ value: v.Vendor_ID, label: v.Company_Name }))} /></div>
                     <button disabled={busy} onClick={() => run(() => onCreateTask(comm.Comm_ID, vendorId))}
                       className="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-lg cursor-pointer disabled:opacity-50 whitespace-nowrap">Create design task</button>
                   </div>
