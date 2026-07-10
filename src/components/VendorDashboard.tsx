@@ -5,7 +5,7 @@ import TaskDetailModal from './TaskDetailModal';
 import VendorsPanel from './VendorsPanel';
 import HistoryPanel from './HistoryPanel';
 import { Portal } from './Modal';
-import { Select } from './Field';
+import { Select, DatePicker } from './Field';
 import { Plus, Filter, Clock, AlertTriangle, User, Layers, ExternalLink, FileCode, Check, X, Search, LayoutGrid, Users, Archive, Sparkles } from 'lucide-react';
 
 // Asset types grouped by category for the dropdowns
@@ -581,13 +581,7 @@ export default function VendorDashboard({
                 {/* Due Date */}
                 <div className="space-y-1.5">
                   <label className="text-slate-600 font-sans text-xs font-semibold">Due date</label>
-                  <input
-                    type="date"
-                    required
-                    value={newDueDate}
-                    onChange={(e) => setNewDueDate(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-lg px-4 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400 font-mono transition-all"
-                  />
+                  <DatePicker value={newDueDate} onChange={setNewDueDate} min={new Date().toISOString().slice(0, 10)} />
                 </div>
 
                 {/* System automation note */}

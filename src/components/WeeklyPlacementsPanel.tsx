@@ -1,6 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { WeeklyPlacement, PlacementSurface, PLACEMENT_SURFACES } from '../types';
-import { Select } from './Field';
+import { Select, DatePicker } from './Field';
 import { Plus, X, Trash2, ImageIcon, Pencil } from 'lucide-react';
 
 interface Props {
@@ -93,13 +93,11 @@ export default function WeeklyPlacementsPanel({ placements, onAdd, onEdit, onDel
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-1">
               <label className="text-slate-600 text-xs font-semibold">Week start *</label>
-              <input type="date" required value={form.Start_Date || ''} onChange={e => set('Start_Date', e.target.value)}
-                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-slate-400" />
+              <DatePicker value={form.Start_Date || ''} onChange={v => set('Start_Date', v)} />
             </div>
             <div className="space-y-1">
               <label className="text-slate-600 text-xs font-semibold">Week end *</label>
-              <input type="date" required value={form.End_Date || ''} onChange={e => set('End_Date', e.target.value)}
-                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-slate-400" />
+              <DatePicker value={form.End_Date || ''} onChange={v => set('End_Date', v)} />
             </div>
             <div className="space-y-1">
               <label className="text-slate-600 text-xs font-semibold">Campaign theme</label>

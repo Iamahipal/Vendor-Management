@@ -1,7 +1,7 @@
 import { useState, FormEvent } from 'react';
 import { Task, Deliverable, Vendor, getDueUrgency } from '../types';
 import { Portal } from './Modal';
-import { Select } from './Field';
+import { Select, DatePicker } from './Field';
 import { X, Pencil, Trash2, Clock, User, MessageSquare, FileCode, Eye } from 'lucide-react';
 
 interface TaskDetailModalProps {
@@ -136,8 +136,7 @@ export default function TaskDetailModal({
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-slate-600 text-xs font-semibold">Due date</label>
-                  <input type="date" required value={dueDate} onChange={e => setDueDate(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-slate-400" />
+                  <DatePicker value={dueDate} onChange={setDueDate} />
                 </div>
                 <div className="space-y-1">
                   <label className="text-slate-600 text-xs font-semibold">Vendor</label>
