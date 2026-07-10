@@ -4,6 +4,8 @@ import GlassTile from './GlassTile';
 import TaskDetailModal from './TaskDetailModal';
 import VendorsPanel from './VendorsPanel';
 import HistoryPanel from './HistoryPanel';
+import { Portal } from './Modal';
+import { Select } from './Field';
 import { Plus, Filter, Clock, AlertTriangle, User, Layers, ExternalLink, FileCode, Check, X, Search, LayoutGrid, Users, Archive, Sparkles } from 'lucide-react';
 
 // Asset types grouped by category for the dropdowns
@@ -524,8 +526,9 @@ export default function VendorDashboard({
 
       {/* Slide-over or Frosted Glass Pop-up: Create New Creative Request */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-xl w-full max-w-xl shadow-2xl overflow-hidden animate-slide-in">
+        <Portal>
+        <div className="fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-xl shadow-2xl ring-1 ring-slate-900/5 overflow-hidden animate-slide-in">
             {/* Header */}
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50">
               <h3 className="font-sans font-bold text-slate-900 text-sm">New design request</h3>
@@ -584,33 +587,25 @@ export default function VendorDashboard({
                 {/* Asset Type */}
                 <div className="space-y-1.5">
                   <label className="text-slate-600 font-sans text-xs font-semibold">Type of design</label>
-                  <select
-                    value={newAssetType}
-                    onChange={(e) => handleAssetTypeChange(e.target.value as AssetType)}
-                    className="w-full bg-white border border-slate-200 rounded-lg px-4 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400 font-sans transition-all cursor-pointer"
-                  >
+                  <Select value={newAssetType} onChange={(e) => handleAssetTypeChange(e.target.value as AssetType)}>
                     {ASSET_GROUPS.map(g => (
                       <optgroup key={g.category} label={g.category}>
                         {g.types.map(t => <option key={t} value={t}>{t}</option>)}
                       </optgroup>
                     ))}
-                  </select>
+                  </Select>
                 </div>
 
                 {/* Assigned Vendor */}
                 <div className="space-y-1.5">
                   <label className="text-slate-600 font-sans text-xs font-semibold">Which vendor?</label>
-                  <select
-                    value={newVendorId || (vendors.length > 0 ? vendors[0].Vendor_ID : '')}
-                    onChange={(e) => setNewVendorId(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-lg px-4 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400 font-sans transition-all cursor-pointer"
-                  >
+                  <Select value={newVendorId || (vendors.length > 0 ? vendors[0].Vendor_ID : '')} onChange={(e) => setNewVendorId(e.target.value)}>
                     {vendors.map(v => (
                       <option key={v.Vendor_ID} value={v.Vendor_ID}>
                         {v.Company_Name} ({v.Specialty})
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
 
                 {/* Due Date */}
@@ -686,12 +681,14 @@ export default function VendorDashboard({
             </form>
           </div>
         </div>
+        </Portal>
       )}
 
       {/* Review Dialog: View Submitted Mockup Asset & Run Manual Approvals */}
       {currentReviewingDeliverable && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-xl w-full max-w-2xl shadow-2xl overflow-hidden animate-slide-in flex flex-col md:flex-row h-[580px]">
+        <Portal>
+        <div className="fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl ring-1 ring-slate-900/5 overflow-hidden animate-slide-in flex flex-col md:flex-row h-[580px]">
             {/* Visual Mockup File Preview */}
             <div className="flex-1 bg-slate-50 relative overflow-hidden flex flex-col justify-between p-4 border-r border-slate-200">
               <span className="absolute top-4 left-4 text-[10px] font-mono bg-white px-2 py-1 rounded border border-slate-200 text-slate-500 uppercase tracking-wider z-10 shadow-3xs">
@@ -829,6 +826,7 @@ export default function VendorDashboard({
             </div>
           </div>
         </div>
+        </Portal>
       )}
 
       {/* Full request detail: edit, cancel, question thread, versions */}

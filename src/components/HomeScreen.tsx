@@ -45,7 +45,7 @@ export default function HomeScreen({ userName, counts, onOpen }: HomeScreenProps
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {TILES.map(t => (
           <button key={t.view} onClick={() => onOpen(t.view)}
-            className={`group text-left bg-white border border-slate-200 rounded-2xl p-6 shadow-xs transition-all cursor-pointer hover:shadow-md ${t.accent}`}>
+            className={`group text-left bg-white border border-slate-200 rounded-2xl p-6 shadow-xs transition-all duration-200 cursor-pointer hover:shadow-lg hover:-translate-y-0.5 ${t.accent}`}>
             <div className={`h-12 w-12 rounded-xl flex items-center justify-center ${t.iconBg}`}>
               <t.icon className="h-6 w-6" />
             </div>

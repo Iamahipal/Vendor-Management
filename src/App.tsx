@@ -45,6 +45,8 @@ export default function App() {
 
   // Which of the three areas is open (home = the tile picker)
   const [view, setView] = useState<'home' | HomeView>('home');
+  // Small demo-info popover in the header (static build only)
+  const [demoOpen, setDemoOpen] = useState(false);
 
   // Live Toast notifications queue
   const [alerts, setAlerts] = useState<AlertNotification[]>([]);
@@ -487,12 +489,12 @@ export default function App() {
       </div>
 
       {/* Global Application Header bar */}
-      <header className="sticky top-0 z-40 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between gap-4 shadow-xs">
+      <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-slate-200/80 px-6 py-3.5 flex items-center justify-between gap-4">
 
         {/* Title branding logo — click to go home */}
         <div className="flex items-center gap-3">
           <button onClick={() => setView('home')} aria-label="Home"
-            className="h-9 w-9 bg-slate-900 rounded-lg flex items-center justify-center shadow-xs cursor-pointer">
+            className="h-9 w-9 bg-gradient-to-br from-slate-700 to-slate-950 rounded-xl flex items-center justify-center shadow-sm ring-1 ring-slate-900/10 cursor-pointer transition-transform hover:scale-105">
             <Compass className="h-5 w-5 text-white" />
           </button>
           <div>
@@ -503,35 +505,41 @@ export default function App() {
           </div>
         </div>
 
-        {view !== 'home' && (
-          <button onClick={() => setView('home')}
-            className="py-2 px-4 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 hover:text-slate-900 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all cursor-pointer">
-            <HomeIcon className="h-4 w-4" />
-            Home
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {DEMO_MODE && (
+            <div className="relative">
+              <button onClick={() => setDemoOpen(o => !o)}
+                className="py-1.5 px-3 bg-violet-50 hover:bg-violet-100 border border-violet-200 text-violet-700 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer">
+                <Sparkles className="h-3.5 w-3.5" />Demo
+              </button>
+              {demoOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setDemoOpen(false)} />
+                  <div className="absolute right-0 mt-2 w-72 bg-white border border-slate-200 rounded-xl shadow-xl ring-1 ring-slate-900/5 p-4 z-50 animate-slide-in">
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      <span className="font-bold text-slate-900">Interactive demo.</span> Everything runs in your browser and is saved on this device — book slots, submit release requests, brief vendors.
+                    </p>
+                    <button onClick={() => { resetDemoDb(); window.location.reload(); }}
+                      className="mt-3 w-full py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer">
+                      <RefreshCw className="h-3.5 w-3.5" />Reset demo data
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          {view !== 'home' && (
+            <button onClick={() => setView('home')}
+              className="py-2 px-4 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 hover:text-slate-900 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all cursor-pointer">
+              <HomeIcon className="h-4 w-4" />
+              Home
+            </button>
+          )}
+        </div>
       </header>
 
       {/* Main Container Wrapper */}
       <main className="flex-1 p-6 max-w-7xl mx-auto w-full space-y-6 pb-24">
-
-        {/* Static demo notice (GitHub Pages build) */}
-        {DEMO_MODE && (
-          <div className="p-3 rounded-xl border border-violet-200 bg-violet-50 text-violet-900 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs shadow-xs">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-violet-600 shrink-0" />
-              <span>
-                <span className="font-bold">Interactive demo</span> — everything runs in your browser and is saved on this device. Try booking slots, submitting a release request, and briefing vendors.
-              </span>
-            </div>
-            <button
-              onClick={() => { resetDemoDb(); window.location.reload(); }}
-              className="self-start sm:self-auto shrink-0 px-3 py-1.5 bg-white border border-violet-300 hover:bg-violet-100 text-violet-800 font-bold rounded-lg text-[11px] transition-all cursor-pointer"
-            >
-              Reset Demo Data
-            </button>
-          </div>
-        )}
 
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">

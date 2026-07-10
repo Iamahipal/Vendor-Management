@@ -9,7 +9,22 @@
 body {
   background-color: #f8fafc;
   color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
+
+/* Let native date/time pickers pick up the app accent */
+:root { accent-color: #0f172a; color-scheme: light; }
+
+/* Thin, unobtrusive scrollbars inside panels and modals */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+*::-webkit-scrollbar-track { background: transparent; }
 
 /* Custom micro-animations */
 @keyframes slideIn {
