@@ -4,6 +4,7 @@ import {
   AUDIENCES, COMM_CATEGORIES, COMM_LANGUAGES, CommCategory, STANDARD_RELEASE_TIMES, IC_SPOCS,
 } from '../types';
 import { Select, fieldBase } from './Field';
+import { CHANNEL_OPTIONS } from './channelIcons';
 import { ClipboardList, Rocket, Clock, CheckCircle2, History, Download } from 'lucide-react';
 
 interface Props {
@@ -128,9 +129,7 @@ export default function ReleaseRequestForm({ communications, onSubmit, onRelease
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="space-y-1">
               <label className={label}>Channel *</label>
-              <Select value={channel} onChange={e => setChannel(e.target.value as CommsChannel)}>
-                {COMMS_CHANNELS.map(c => <option key={c} value={c}>{c}</option>)}
-              </Select>
+              <Select value={channel} onChange={v => setChannel(v as CommsChannel)} options={CHANNEL_OPTIONS} />
               <p className="text-[11px] text-slate-400">{rule.frequency}{CHANNEL_ASSET_TYPE[channel] ? ' · needs a creative' : ''}</p>
             </div>
             <div className="space-y-1">
@@ -143,10 +142,8 @@ export default function ReleaseRequestForm({ communications, onSubmit, onRelease
               {specialTime ? (
                 <input type="text" required value={time} onChange={e => setTime(e.target.value)} placeholder="HH:MM" className={input} />
               ) : (
-                <Select value={time} onChange={e => { if (e.target.value === '__special') { setSpecialTime(true); } else setTime(e.target.value); }}>
-                  {STANDARD_RELEASE_TIMES.map(t => <option key={t} value={t}>{t}</option>)}
-                  <option value="__special">Special time…</option>
-                </Select>
+                <Select value={time} onChange={v => { if (v === '__special') { setSpecialTime(true); } else setTime(v); }}
+                  options={[...STANDARD_RELEASE_TIMES.map(t => ({ value: t, label: t })), { value: '__special', label: 'Special time…' }]} />
               )}
               {specialTime && <button type="button" onClick={() => { setSpecialTime(false); setTime('10:00'); }} className="text-[11px] text-slate-400 hover:text-slate-600 cursor-pointer">← back to standard slots</button>}
             </div>
@@ -168,16 +165,12 @@ export default function ReleaseRequestForm({ communications, onSubmit, onRelease
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-1">
               <label className={label}>Audience</label>
-              <Select value={audience} onChange={e => setAudience(e.target.value)}>
-                {AUDIENCES.map(a => <option key={a} value={a}>{a}</option>)}
-              </Select>
+              <Select value={audience} onChange={setAudience} options={AUDIENCES.map(a => ({ value: a, label: a }))} />
             </div>
             <div className="space-y-1">
               <label className={label}>Priority</label>
-              <Select value={category} onChange={e => setCategory(e.target.value as CommCategory)}>
-                <option value="">—</option>
-                {COMM_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </Select>
+              <Select value={category} onChange={v => setCategory(v as CommCategory)}
+                options={[{ value: '', label: '—' }, ...COMM_CATEGORIES.map(c => ({ value: c, label: c }))]} />
             </div>
           </div>
           <div className="space-y-1">

@@ -341,35 +341,15 @@ export default function VendorDashboard({
           </div>
 
           {/* Asset Type Filter */}
-          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg">
-            <Filter className="h-3.5 w-3.5 text-slate-500" />
-            <select
-              value={filterAssetType}
-              onChange={(e) => setFilterAssetType(e.target.value)}
-              className="bg-transparent text-xs font-sans font-semibold text-slate-700 outline-none cursor-pointer"
-            >
-              <option value="ALL">All Asset Types</option>
-              {ASSET_GROUPS.map(g => (
-                <optgroup key={g.category} label={g.category}>
-                  {g.types.map(t => <option key={t} value={t}>{t}</option>)}
-                </optgroup>
-              ))}
-            </select>
+          <div className="w-full sm:w-48">
+            <Select value={filterAssetType} onChange={setFilterAssetType}
+              options={[{ value: 'ALL', label: 'All asset types', icon: <Filter className="h-4 w-4" /> }, ...ASSET_GROUPS.flatMap(g => g.types.map(t => ({ value: t, label: t, group: g.category })))]} />
           </div>
 
           {/* Vendor Filter */}
-          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg">
-            <User className="h-3.5 w-3.5 text-slate-500" />
-            <select
-              value={filterVendor}
-              onChange={(e) => setFilterVendor(e.target.value)}
-              className="bg-transparent text-xs font-sans font-semibold text-slate-700 outline-none cursor-pointer"
-            >
-              <option value="ALL">All Vendors</option>
-              {vendors.map(v => (
-                <option key={v.Vendor_ID} value={v.Vendor_ID}>{v.Company_Name}</option>
-              ))}
-            </select>
+          <div className="w-full sm:w-44">
+            <Select value={filterVendor} onChange={setFilterVendor}
+              options={[{ value: 'ALL', label: 'All vendors', icon: <User className="h-4 w-4" /> }, ...vendors.map(v => ({ value: v.Vendor_ID, label: v.Company_Name }))]} />
           </div>
         </div>
 
@@ -587,25 +567,15 @@ export default function VendorDashboard({
                 {/* Asset Type */}
                 <div className="space-y-1.5">
                   <label className="text-slate-600 font-sans text-xs font-semibold">Type of design</label>
-                  <Select value={newAssetType} onChange={(e) => handleAssetTypeChange(e.target.value as AssetType)}>
-                    {ASSET_GROUPS.map(g => (
-                      <optgroup key={g.category} label={g.category}>
-                        {g.types.map(t => <option key={t} value={t}>{t}</option>)}
-                      </optgroup>
-                    ))}
-                  </Select>
+                  <Select value={newAssetType} onChange={v => handleAssetTypeChange(v as AssetType)}
+                    options={ASSET_GROUPS.flatMap(g => g.types.map(t => ({ value: t, label: t, group: g.category })))} />
                 </div>
 
                 {/* Assigned Vendor */}
                 <div className="space-y-1.5">
                   <label className="text-slate-600 font-sans text-xs font-semibold">Which vendor?</label>
-                  <Select value={newVendorId || (vendors.length > 0 ? vendors[0].Vendor_ID : '')} onChange={(e) => setNewVendorId(e.target.value)}>
-                    {vendors.map(v => (
-                      <option key={v.Vendor_ID} value={v.Vendor_ID}>
-                        {v.Company_Name} ({v.Specialty})
-                      </option>
-                    ))}
-                  </Select>
+                  <Select value={newVendorId || (vendors.length > 0 ? vendors[0].Vendor_ID : '')} onChange={setNewVendorId}
+                    options={vendors.map(v => ({ value: v.Vendor_ID, label: `${v.Company_Name} (${v.Specialty})` }))} />
                 </div>
 
                 {/* Due Date */}
