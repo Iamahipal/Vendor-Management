@@ -7,7 +7,7 @@ import {
 } from '../types';
 import WeeklyPlacementsPanel from './WeeklyPlacementsPanel';
 import Modal from './Modal';
-import { Select, fieldBase } from './Field';
+import { Select, DatePicker, fieldBase } from './Field';
 import { CHANNEL_OPTIONS, channelIcon } from './channelIcons';
 import {
   CalendarDays, Plus, Clock, Building2, Palette, Send, CheckCircle2, Trash2,
@@ -406,7 +406,7 @@ function BookingForm({ preset, onClose, onBook, onParse }: {
   const inp = fieldBase;
 
   return (
-    <Modal open onClose={onClose} title={isBlock ? 'Block a slot' : 'Book a slot'} icon={<CalendarDays className="h-5 w-5" />}>
+    <Modal open onClose={onClose} size="max-w-2xl" title={isBlock ? 'Block a slot' : 'Book a slot'} icon={<CalendarDays className="h-5 w-5" />}>
         <form onSubmit={submit} className="p-6 space-y-3 overflow-y-auto">
           {!isBlock && (
             <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 space-y-2">
@@ -436,7 +436,7 @@ function BookingForm({ preset, onClose, onBook, onParse }: {
             </div>
             <div className="space-y-1">
               <label className="text-slate-600 text-xs font-semibold">Date *</label>
-              <input type="date" required value={date} onChange={e => setDate(e.target.value)} className={inp} />
+              <DatePicker value={date} onChange={setDate} />
             </div>
             <div className="space-y-1">
               <label className="text-slate-600 text-xs font-semibold">Time *</label>

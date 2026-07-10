@@ -3,7 +3,7 @@ import {
   Communication, CommsChannel, COMMS_CHANNELS, CHANNEL_RULES, CHANNEL_ASSET_TYPE,
   AUDIENCES, COMM_CATEGORIES, COMM_LANGUAGES, CommCategory, STANDARD_RELEASE_TIMES, IC_SPOCS,
 } from '../types';
-import { Select, fieldBase } from './Field';
+import { Select, DatePicker, fieldBase } from './Field';
 import { CHANNEL_OPTIONS } from './channelIcons';
 import { ClipboardList, Rocket, Clock, CheckCircle2, History, Download } from 'lucide-react';
 
@@ -134,7 +134,7 @@ export default function ReleaseRequestForm({ communications, onSubmit, onRelease
             </div>
             <div className="space-y-1">
               <label className={label}>Target date *</label>
-              <input type="date" required value={date} min={fyMin} max={fyMax} onChange={e => setDate(e.target.value)} className={input} />
+              <DatePicker value={date} onChange={setDate} min={fyMin} max={fyMax} />
               <p className="text-[11px] text-slate-400">{weekdayLabel(date)}</p>
             </div>
             <div className="space-y-1">
