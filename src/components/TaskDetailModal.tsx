@@ -1,5 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { Task, Deliverable, Vendor, getDueUrgency } from '../types';
+import { Portal } from './Modal';
 import { X, Pencil, Trash2, Clock, User, MessageSquare, FileCode, Eye } from 'lucide-react';
 
 interface TaskDetailModalProps {
@@ -77,8 +78,9 @@ export default function TaskDetailModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden animate-slide-in flex flex-col max-h-[90vh]">
+    <Portal>
+    <div className="fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-xl shadow-2xl ring-1 ring-slate-900/5 overflow-hidden animate-slide-in flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-start gap-3 shrink-0">
           <div className="min-w-0">
@@ -296,5 +298,6 @@ export default function TaskDetailModal({
         </div>
       </div>
     </div>
+    </Portal>
   );
 }

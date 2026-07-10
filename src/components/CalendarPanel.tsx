@@ -6,8 +6,10 @@ import {
   STANDARD_RELEASE_TIMES, IC_SPOCS, spocColor, BookingDraft,
 } from '../types';
 import WeeklyPlacementsPanel from './WeeklyPlacementsPanel';
+import Modal from './Modal';
+import { Select, fieldBase } from './Field';
 import {
-  CalendarDays, Plus, X, Clock, Building2, Palette, Send, CheckCircle2, Trash2,
+  CalendarDays, Plus, Clock, Building2, Palette, Send, CheckCircle2, Trash2,
   ChevronLeft, ChevronRight, Ban, ImageIcon, AlertTriangle, Grid3x3, CalendarRange,
   Sparkles, User as UserIcon,
 } from 'lucide-react';
@@ -400,15 +402,10 @@ function BookingForm({ preset, onClose, onBook, onParse }: {
     setBusy(false);
   };
 
-  const inp = 'w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-slate-400';
+  const inp = fieldBase;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden animate-slide-in flex flex-col max-h-[92vh]">
-        <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
-          <h3 className="font-bold text-slate-900 text-sm">{isBlock ? 'Block a slot' : 'Book a slot'}</h3>
-          <button onClick={onClose} className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-400 cursor-pointer"><X className="h-5 w-5" /></button>
-        </div>
+    <Modal open onClose={onClose} title={isBlock ? 'Block a slot' : 'Book a slot'} icon={<CalendarDays className="h-5 w-5" />}>
         <form onSubmit={submit} className="p-6 space-y-3 overflow-y-auto">
           {!isBlock && (
             <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 space-y-2">
@@ -433,9 +430,9 @@ function BookingForm({ preset, onClose, onBook, onParse }: {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="space-y-1">
               <label className="text-slate-600 text-xs font-semibold">Channel *</label>
-              <select value={channel} onChange={e => setChannel(e.target.value as CommsChannel)} className={inp + ' cursor-pointer'}>
+              <Select value={channel} onChange={e => setChannel(e.target.value as CommsChannel)}>
                 {COMMS_CHANNELS.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              </Select>
               <p className="text-[11px] text-slate-400">{rule.frequency}{CHANNEL_ASSET_TYPE[channel] ? ' · needs a creative' : ''}</p>
             </div>
             <div className="space-y-1">
@@ -447,10 +444,10 @@ function BookingForm({ preset, onClose, onBook, onParse }: {
               {specialTime ? (
                 <input type="text" required value={time} onChange={e => setTime(e.target.value)} placeholder="HH:MM" className={inp} />
               ) : (
-                <select value={time} onChange={e => { if (e.target.value === '__special') setSpecialTime(true); else setTime(e.target.value); }} className={inp + ' cursor-pointer'}>
+                <Select value={time} onChange={e => { if (e.target.value === '__special') setSpecialTime(true); else setTime(e.target.value); }}>
                   {SLOT4.map(t => <option key={t} value={t}>{t}</option>)}
                   <option value="__special">Special time…</option>
-                </select>
+                </Select>
               )}
               {specialTime && <button type="button" onClick={() => { setSpecialTime(false); setTime('10:00'); }} className="text-[11px] text-slate-400 hover:text-slate-600 cursor-pointer">← standard slots</button>}
             </div>
@@ -489,16 +486,16 @@ function BookingForm({ preset, onClose, onBook, onParse }: {
                 </div>
                 <div className="space-y-1">
                   <label className="text-slate-600 text-xs font-semibold">Priority</label>
-                  <select value={category} onChange={e => setCategory(e.target.value as CommCategory)} className={inp + ' cursor-pointer'}>
+                  <Select value={category} onChange={e => setCategory(e.target.value as CommCategory)}>
                     <option value="">—</option>
                     {COMM_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                  </Select>
                 </div>
                 <div className="space-y-1">
                   <label className="text-slate-600 text-xs font-semibold">Audience</label>
-                  <select value={audience} onChange={e => setAudience(e.target.value)} className={inp + ' cursor-pointer'}>
+                  <Select value={audience} onChange={e => setAudience(e.target.value)}>
                     {AUDIENCES.map(a => <option key={a} value={a}>{a}</option>)}
-                  </select>
+                  </Select>
                 </div>
               </div>
               <div className="space-y-1">
@@ -518,8 +515,7 @@ function BookingForm({ preset, onClose, onBook, onParse }: {
             <button type="submit" disabled={busy} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-bold cursor-pointer disabled:opacity-50">{busy ? 'Saving...' : isBlock ? 'Block slot' : 'Book slot'}</button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -544,26 +540,25 @@ function CommDetail({ comm, vendors, tasks, onClose, onCancel, onCreateTask, onM
   const spoc = comm.Blocked ? null : spocColor(comm.Comms_SPOC);
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-slide-in flex flex-col max-h-[90vh]">
-        <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-start gap-3 shrink-0">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <span className="text-xs font-semibold text-slate-600 bg-slate-200/70 px-2 py-0.5 rounded">{comm.Channel}</span>
+    <Modal open onClose={onClose} size="max-w-lg"
+      icon={<CalendarDays className="h-5 w-5" />}
+      title={comm.Blocked ? 'Blocked slot' : comm.Campaign_Name}
+      subtitle={comm.Blocked ? undefined : (comm.Subject_Line || `${comm.Channel} booking`)}>
+      <div className="p-6 space-y-4 overflow-y-auto text-sm">
+          {/* Status / meta row */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded">{comm.Channel}</span>
               <span className={`px-2 py-0.5 rounded text-xs font-bold border ${STATUS_STYLE[comm.Status]}`}>{comm.Status}</span>
               {comm.Category && <span className="text-xs font-bold text-rose-600">{comm.Category}</span>}
             </div>
-            <h3 className="font-bold text-slate-900 text-base leading-snug break-words">{comm.Blocked ? 'Blocked slot' : comm.Campaign_Name}</h3>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 mt-1">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
               <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{comm.Release_Date} · {comm.Release_Time}</span>
               {comm.Department && <span className="flex items-center gap-1"><Building2 className="h-3.5 w-3.5" />{comm.Department}</span>}
               {!comm.Blocked && <span className="flex items-center gap-1">{spoc && <span className={`h-2 w-2 rounded-full ${spoc.dot}`} />}{comm.Comms_SPOC}</span>}
             </div>
           </div>
-          <button onClick={onClose} aria-label="Close booking details" className="p-2 hover:bg-slate-200 rounded-lg text-slate-400 cursor-pointer shrink-0"><X className="h-5 w-5" /></button>
-        </div>
 
-        <div className="p-6 space-y-4 overflow-y-auto text-sm">
           {!comm.Blocked && (
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 bg-slate-50 border border-slate-200 rounded-xl p-4 text-slate-600">
               <div className="col-span-2"><span className="text-xs text-slate-400 block">Subject</span>{comm.Subject_Line || '—'}</div>
@@ -587,9 +582,9 @@ function CommDetail({ comm, vendors, tasks, onClose, onCancel, onCreateTask, onM
                 <div className="bg-violet-50 border border-violet-200 rounded-lg p-3 space-y-2">
                   <div className="text-xs font-bold text-violet-900 flex items-center gap-1.5"><Palette className="h-4 w-4" />This channel needs a creative — brief a vendor:</div>
                   <div className="flex gap-2">
-                    <select value={vendorId} onChange={e => setVendorId(e.target.value)} className="flex-1 bg-white border border-violet-200 rounded-lg px-2 py-1.5 text-sm outline-none cursor-pointer">
+                    <div className="flex-1"><Select value={vendorId} onChange={e => setVendorId(e.target.value)}>
                       {vendors.map(v => <option key={v.Vendor_ID} value={v.Vendor_ID}>{v.Company_Name}</option>)}
-                    </select>
+                    </Select></div>
                     <button disabled={busy} onClick={() => run(() => onCreateTask(comm.Comm_ID, vendorId))}
                       className="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-lg cursor-pointer disabled:opacity-50 whitespace-nowrap">Create design task</button>
                   </div>
@@ -647,8 +642,7 @@ function CommDetail({ comm, vendors, tasks, onClose, onCancel, onCreateTask, onM
               )}
             </div>
           )}
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }
